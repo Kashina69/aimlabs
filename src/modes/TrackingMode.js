@@ -9,10 +9,19 @@ export class TrackingMode {
   }
 
   start() {
-    const pos = new THREE.Vector3(0, 2, 10);
+    this.spawnTarget();
+    this.vx = 0.03; this.vy = 0.015;
+  }
+
+  /* What/why/how: Always respawn a target after a hit so tracking mode remains continuous. */
+  spawnTarget() {
+    const pos = new THREE.Vector3(
+      THREE.MathUtils.randFloatSpread(4),
+      THREE.MathUtils.randFloat(1, 3.5),
+      THREE.MathUtils.randFloat(8, 12)
+    );
     this.target = this.game.pool.acquire(pos, this.game.settings.targetSize || 0.4, 1);
     this.game.scene.scene.add(this.target.mesh);
-    this.vx = 0.03; this.vy = 0.015;
   }
 
   update() {
@@ -31,6 +40,7 @@ export class TrackingMode {
         this.target.deactivate();
         this.game.pool.release(this.target);
         this.target = null;
+        this.spawnTarget();
         return;
       }
     }

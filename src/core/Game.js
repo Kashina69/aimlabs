@@ -7,15 +7,13 @@ import { Pool } from './Pool.js';
 import { Target } from './Target.js';
 import { AudioManager } from '../audio/AudioManager.js';
 import { Storage } from '../utils/Storage.js';
-
 import { Menu } from '../ui/Menu.js';
 import { HUD } from '../ui/HUD.js';
 import { Settings } from '../ui/Settings.js';
 import { StatsUI } from '../ui/Stats.js';
 import { StatsManager } from '../utils/StatsManager.js';
-
-// Modes
-import { StaticMode } from '../modes/StaticMode.js';
+import { OverlayManager } from '../ui/OverlayManager.js';
+import { loadSelectableModes } from './ModeRegistry.js';
 
 export class Game {
   constructor() {
@@ -28,67 +26,69 @@ export class Game {
     this.input = new Input(this.renderer.canvas);
     this.scene = new GameScene();
     this.audio = new AudioManager();
-
     this.pool = new Pool(
       () => new Target(),
-      (t) => { t.deactivate(); this.scene.scene.remove(t.mesh); }
+      (target) => {
+        target.deactivate();
+        this.scene.scene.remove(target.mesh);
+      }
     );
 
     this.settings = this.loadSettings();
     this.currentMode = null;
+    this.currentModeName = null;
     this.isRunning = false;
-
+    this.sessionStart = 0;
     this.fps = 60;
     this.frameCount = 0;
     this.lastTime = 0;
+    this.uiTimers = [];
 
     this.initUI();
-    // expose for debugging in browser console
-    try { window.game = this; } catch (e) {}
+    try {
+      window.game = this;
+    } catch (error) {
+      // no-op
+    }
   }
 
+  /* What/why/how: Build persistent UI layers once so mode/menu switches do not destroy HUD elements. */
   initUI() {
-    // Basic UI initialization so Menu/HUD can attach later
     this.uiRoot.innerHTML = '';
-    this.crosshair.style.display = 'none';
-    // create initial menu immediately so user can start
-    try {
-      this.menu = new Menu(this.uiRoot, this, { showResume: false });
-    } catch (e) {
-      // if Menu isn't available yet, create a simple fallback
-      const el = document.createElement('div');
-      el.className = 'glass';
-      el.style.cssText = 'position:absolute; top:10%; left:10%; padding:12px;';
-      el.innerHTML = '<button class="btn" id="start-btn">Start</button>';
-      this.uiRoot.appendChild(el);
-      el.querySelector('#start-btn').addEventListener('click', () => this.showModeSelect());
-    }
+    this.persistentLayer = document.createElement('div');
+    this.persistentLayer.id = 'ui-persistent';
+    this.overlayLayer = document.createElement('div');
+    this.overlayLayer.id = 'ui-overlay';
+    this.uiRoot.appendChild(this.persistentLayer);
+    this.uiRoot.appendChild(this.overlayLayer);
+    this.overlay = new OverlayManager(this.overlayLayer);
 
-    // create gun HUD element (simple, lightweight)
+    this.crosshair.style.display = 'none';
+    this.createWeaponFeedbackUI();
+  }
+
+  createWeaponFeedbackUI() {
     this.gunEl = document.createElement('div');
     this.gunEl.id = 'gun-hud';
     this.gunEl.style.cssText = 'position:absolute; left:50%; bottom:6%; transform:translateX(-50%); width:140px; height:60px; pointer-events:none; z-index:9998;';
     this.gunEl.innerHTML = '<div id="gun-bar" style="width:100px;height:24px;background:linear-gradient(#222,#111);margin:0 auto;border-radius:6px;box-shadow:0 0 10px rgba(0,255,255,0.08);"></div>';
-    this.uiRoot.appendChild(this.gunEl);
+    this.persistentLayer.appendChild(this.gunEl);
 
-    // add a visible gun sprite centered near bottom
     this.gunSprite = document.createElement('div');
     this.gunSprite.id = 'gun-sprite';
     this.gunSprite.style.cssText = 'position:absolute; left:50%; bottom:4%; transform:translateX(-50%); width:220px; height:120px; pointer-events:none; z-index:9997;';
     this.gunSprite.innerHTML = '<div class="gun-body"></div>';
-    this.uiRoot.appendChild(this.gunSprite);
+    this.persistentLayer.appendChild(this.gunSprite);
 
-    // muzzle flash
     this.muzzle = document.createElement('div');
     this.muzzle.id = 'muzzle-flash';
     this.muzzle.style.cssText = 'position:absolute; left:50%; bottom:18%; transform:translateX(-50%); width:60px; height:60px; border-radius:50%; background:radial-gradient(circle, rgba(255,255,200,0.9) 0%, rgba(255,200,0,0.6) 40%, transparent 60%); mix-blend-mode:screen; opacity:0; pointer-events:none; z-index:9999;';
-    this.uiRoot.appendChild(this.muzzle);
+    this.persistentLayer.appendChild(this.muzzle);
 
-    // hit marker
     this.hitMarker = document.createElement('div');
     this.hitMarker.id = 'hit-marker';
-    this.hitMarker.style.cssText = 'position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:140px; height:140px; border-radius:50%; border:2px solid rgba(0,255,255,0.0); pointer-events:none; transition: all 0.12s ease; z-index:10000;';
-    this.uiRoot.appendChild(this.hitMarker);
+    this.hitMarker.style.cssText = 'position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:140px; height:140px; border-radius:50%; border:2px solid rgba(0,255,255,0.0); pointer-events:none; transition:all 0.12s ease; z-index:10000;';
+    this.persistentLayer.appendChild(this.hitMarker);
   }
 
   loadSettings() {
@@ -99,18 +99,17 @@ export class Game {
       volume: Storage.get('settings.volume', 0.7),
       graphics: Storage.get('settings.graphics', 'medium'),
       targetSize: Storage.get('settings.targetSize', 0.3),
-      invertY: Storage.get('settings.invertY', false),
+      spawnSpeed: Storage.get('settings.spawnSpeed', 1),
+      movementSpeed: Storage.get('settings.movementSpeed', 1),
+      invertY: Storage.get('settings.invertY', false)
     };
   }
 
   init() {
     this.bindEvents();
-    this.hud = new HUD(this.uiRoot, this);
-    // if returning from pause, show resume option
-    const showResume = !!(this.currentMode && !this.isRunning);
-    this.menu = new Menu(this.uiRoot, this, { showResume });
+    this.hud = new HUD(this.persistentLayer, this);
+    this.showMainMenu(false);
     this.applySettings();
-
     this.animate(0);
   }
 
@@ -121,245 +120,273 @@ export class Game {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    document.addEventListener('keydown', (e) => {
-      // first close active modal if present
-      if (e.code === 'Escape') {
-        if (this.currentModal) {
-          try { this.currentModal.remove(); } catch(e) {}
-          this.currentModal = null;
-          return;
-        }
-        if (this.isRunning) { this.pause(); return; }
-      }
-      if (e.code === 'KeyR') {
-        this.restart();
-      }
-    });
-
+    document.addEventListener('keydown', (event) => this.handleGlobalKeydown(event));
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && this.isRunning) {
-        this.pause(true);
-      }
+      if (document.hidden && this.isRunning) this.pause();
     });
 
-    // listen on the actual canvas for pointer-lock/headshot inputs
-    if (this.renderer && this.renderer.canvas) {
-      this.renderer.canvas.addEventListener('mousedown', (e) => {
-        if (!this.isRunning || !this.input.isLocked) return;
-        this.shoot();
-      });
-    }
+    this.renderer.canvas.addEventListener('mousedown', () => {
+      if (!this.isRunning || !this.input.isLocked) return;
+      this.shootAtCrosshair();
+    });
   }
 
-  shoot() {
-    // play shoot sound and show muzzle flash
-    this.audio.play('shoot');
-    this.muzzle.style.opacity = '1';
-    this.muzzle.style.transform = 'translateX(-50%) scale(1.1)';
-    setTimeout(() => { this.muzzle.style.opacity = '0'; this.muzzle.style.transform = 'translateX(-50%) scale(0.8)'; }, 80);
+  handleGlobalKeydown(event) {
+    if (event.code === 'Escape') {
+      if (this.overlay.activeOverlay) {
+        this.overlay.close();
+        return;
+      }
+      if (this.isRunning) this.pause();
+      return;
+    }
 
-    // small gun recoil effect
-    this.gunEl.querySelector('#gun-bar').style.transform = 'translateY(-6px) scaleX(0.98)';
-    setTimeout(() => { this.gunEl.querySelector('#gun-bar').style.transform = ''; }, 120);
+    if (event.code === 'KeyR') this.restart();
+    if (event.code === 'BracketLeft') this.adjustSensitivityBy(-0.05);
+    if (event.code === 'BracketRight') this.adjustSensitivityBy(0.05);
+  }
+
+  adjustSensitivityBy(delta) {
+    this.settings.sensitivity = Math.max(0.01, Math.min(12, this.settings.sensitivity + delta));
+    Storage.set('settings.sensitivity', this.settings.sensitivity);
+  }
+
+  shootAtCrosshair() {
+    if (!this.currentMode) return;
+    this.audio.play('shoot');
+    this.playShotAnimation();
 
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera({ x: 0, y: 0 }, this.camera.instance);
-    const intersects = raycaster.intersectObjects(this.pool.objects.map(t => t.mesh).filter(m => m.visible));
-    if (intersects.length > 0) {
-      this.currentMode.onClick(intersects);
-      this.triggerHit(true);
-    } else {
-      this.currentMode.onClick([]);
-      this.triggerHit(false);
-    }
+    const visibleMeshes = this.pool.objects.map((target) => target.mesh).filter((mesh) => mesh.visible);
+    const intersects = raycaster.intersectObjects(visibleMeshes);
+    const hit = intersects.length > 0;
+    this.currentMode.onClick(hit ? intersects : []);
+    this.triggerHitFeedback(hit);
   }
 
-  triggerHit(hit = true) {
-    try {
-      this.hitMarker.classList.add(hit ? 'hit' : 'miss');
-      setTimeout(() => { this.hitMarker.classList.remove('hit'); this.hitMarker.classList.remove('miss'); }, 160);
-    } catch (e) {}
+  playShotAnimation() {
+    this.muzzle.style.opacity = '1';
+    this.muzzle.style.transform = 'translateX(-50%) scale(1.1)';
+    this.gunEl.querySelector('#gun-bar').style.transform = 'translateY(-6px) scaleX(0.98)';
+
+    this.queueUITimer(() => {
+      this.muzzle.style.opacity = '0';
+      this.muzzle.style.transform = 'translateX(-50%) scale(0.8)';
+      this.gunEl.querySelector('#gun-bar').style.transform = '';
+    }, 100);
   }
 
-  startMode(ModeClass) {
-    // clean previous mode state
-    if (this.currentMode) {
-      try {
-        const summary = this.currentMode.end && this.currentMode.end();
-        if (summary) {
-          const session = Object.assign({ mode: this.currentMode.constructor.name, start: this.sessionStart || Date.now(), end: Date.now() }, summary);
-          try { StatsManager.push(session); } catch (e) {}
-        }
-      } catch(e){}
-    }
-    // release any active targets to avoid leftover objects
-    this.clearActiveTargets();
+  triggerHitFeedback(hit) {
+    this.hitMarker.classList.add(hit ? 'hit' : 'miss');
+    this.queueUITimer(() => {
+      this.hitMarker.classList.remove('hit');
+      this.hitMarker.classList.remove('miss');
+    }, 160);
+  }
 
-    if (this.menu && this.menu.element) {
-      try { this.menu.element.remove(); } catch(e){}
-    }
-    this.currentMode = new ModeClass(this);
-    this.currentMode.start();
-    // mark session start
-    this.sessionStart = Date.now();
-    this.isRunning = true;
-    this.crosshair.style.display = 'block';
-    this.hitMarker.style.borderColor = 'rgba(0,255,255,0.0)';
-    // request pointer lock on the canvas as this is triggered by a user gesture
+  queueUITimer(fn, delay) {
+    const timerId = setTimeout(() => {
+      this.uiTimers = this.uiTimers.filter((id) => id !== timerId);
+      fn();
+    }, delay);
+    this.uiTimers.push(timerId);
+  }
+
+  clearUITimers() {
+    this.uiTimers.forEach((timerId) => clearTimeout(timerId));
+    this.uiTimers = [];
+  }
+
+  showMainMenu(showResume) {
+    const menu = new Menu(document.createElement('div'), this, { showResume });
+    this.overlay.show(menu.element);
+  }
+
+  endCurrentModeAndSaveSession() {
+    if (!this.currentMode) return;
     try {
-      if (this.renderer && this.renderer.canvas) {
-        this.renderer.canvas.requestPointerLock();
+      const summary = this.currentMode.end?.();
+      if (summary) {
+        StatsManager.push({
+          mode: this.currentModeName || this.currentMode.constructor.name,
+          start: this.sessionStart || Date.now(),
+          end: Date.now(),
+          ...summary
+        });
       }
-    } catch (e) {}
-    // clear any modal reference
-    this.currentModal = null;
+    } catch (error) {
+      console.warn('Mode end failed', error);
+    }
   }
 
   clearActiveTargets() {
+    for (const target of Array.from(this.pool.active)) {
+      this.pool.release(target);
+    }
+  }
+
+  startMode(ModeClass, modeName = 'Unknown') {
+    this.endCurrentModeAndSaveSession();
+    this.clearActiveTargets();
+    this.overlay.close();
+    this.clearUITimers();
+
+    this.currentMode = new ModeClass(this);
+    this.currentModeName = modeName;
+    this.currentMode.start();
+    this.sessionStart = Date.now();
+    this.isRunning = true;
+    this.crosshair.style.display = 'block';
+
     try {
-      if (this.pool && this.pool.active) {
-        for (const t of Array.from(this.pool.active)) {
-          try { this.pool.release(t); } catch(e) {}
-        }
-      }
-    } catch (e) {}
+      this.renderer.canvas.requestPointerLock();
+    } catch (error) {
+      // no-op
+    }
   }
 
   async showModeSelect() {
-    // clear UI so modal sits alone (prevents underlying menus showing through)
-    this.uiRoot.innerHTML = '';
-    try { this.menu.hide(); } catch(e) {}
-    const div = document.createElement('div');
-    div.className = 'glass';
-    div.style.cssText = `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px;`;
-    div.innerHTML = `<h3 class="neon-text">Select Mode</h3>`;
+    const modal = document.createElement('div');
+    modal.className = 'glass';
+    modal.style.cssText = 'position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); padding:20px;';
+    modal.innerHTML = '<h3 class="neon-text">Select Mode</h3>';
 
-    // Build mode list robustly so one failing dynamic import doesn't block others
-    const modes = { Static: StaticMode };
-    const tryImport = async (path, key) => {
-      try {
-        const mod = await import(path);
-        if (mod && mod[key]) modes[key.replace('Mode','')] = mod[key];
-      } catch (err) {
-        console.warn('Mode import failed', path, err);
-      }
-    };
-
-    await Promise.all([
-      tryImport('../modes/FlickMode.js', 'FlickMode'),
-      tryImport('../modes/TrackingMode.js', 'TrackingMode'),
-      tryImport('../modes/ReactionMode.js', 'ReactionMode')
-    ]);
-
-    for (const [name, Mode] of Object.entries(modes)) {
-      const btn = document.createElement('button');
-      btn.className = 'btn';
-      btn.textContent = name;
-      btn.onclick = () => {
+    const modes = await loadSelectableModes();
+    for (const [name, ModeClass] of Object.entries(modes)) {
+      const button = document.createElement('button');
+      button.className = 'btn';
+      button.textContent = name;
+      button.onclick = () => {
         this.audio.play('click');
-        this.uiRoot.innerHTML = '';
-        this.startMode(Mode);
+        this.startMode(ModeClass, name);
       };
-      div.appendChild(btn);
+      modal.appendChild(button);
     }
-    // attach as current modal for ESC handling
-    this.currentModal = div;
 
-    // difficulty controls
-    const diff = document.createElement('div');
-    diff.style.marginTop = '12px';
-    diff.innerHTML = `
-      <div style="margin-top:8px">Difficulty: <select id="diff-select"><option>Easy</option><option selected>Medium</option><option>Hard</option><option>Insane</option></select></div>
+    modal.appendChild(this.buildDifficultySettingsSection());
+    this.overlay.show(modal);
+  }
+
+  /* What/why/how: Keep difficulty controls in one reusable panel so mode tuning is consistent and persisted. */
+  buildDifficultySettingsSection() {
+    const panel = document.createElement('div');
+    panel.style.marginTop = '12px';
+    panel.innerHTML = `
       <div style="margin-top:6px">Target size: <input id="targetSize" type="range" min="0.01" max="2" step="0.01" value="${this.settings.targetSize}"> <input id="targetSizeVal" type="number" step="0.01" value="${this.settings.targetSize}" style="width:72px; margin-left:8px"></div>
-      <div>Spawn speed: <input id="spawnSpeed" type="range" min="0" max="5" step="0.01" value="${this.settings.spawnSpeed||1}"> <input id="spawnSpeedVal" type="number" step="0.01" value="${this.settings.spawnSpeed||1}" style="width:72px; margin-left:8px"></div>
-      <div>Movement speed: <input id="moveSpeed" type="range" min="0" max="3" step="0.01" value="${this.settings.movementSpeed||1}"> <input id="moveSpeedVal" type="number" step="0.01" value="${this.settings.movementSpeed||1}" style="width:72px; margin-left:8px"></div>
+      <div>Spawn speed: <input id="spawnSpeed" type="range" min="0" max="5" step="0.01" value="${this.settings.spawnSpeed}"> <input id="spawnSpeedVal" type="number" step="0.01" value="${this.settings.spawnSpeed}" style="width:72px; margin-left:8px"></div>
+      <div>Movement speed: <input id="moveSpeed" type="range" min="0" max="3" step="0.01" value="${this.settings.movementSpeed}"> <input id="moveSpeedVal" type="number" step="0.01" value="${this.settings.movementSpeed}" style="width:72px; margin-left:8px"></div>
+      <div style="font-size:12px; opacity:.8; margin-top:8px;">Quick sensitivity: '[' and ']'</div>
     `;
-    div.appendChild(diff);
 
-    const tRange = diff.querySelector('#targetSize');
-    const tNum = diff.querySelector('#targetSizeVal');
-    const sRange = diff.querySelector('#spawnSpeed');
-    const sNum = diff.querySelector('#spawnSpeedVal');
-    const mRange = diff.querySelector('#moveSpeed');
-    const mNum = diff.querySelector('#moveSpeedVal');
-    const sync = (r, n, key) => {
-      r.addEventListener('input', (e) => { const v = parseFloat(e.target.value); n.value = v; this.settings[key] = v; Storage.set(`settings.${key}`, v); });
-      n.addEventListener('change', (e) => { const v = parseFloat(e.target.value); r.value = v; this.settings[key] = v; Storage.set(`settings.${key}`, v); });
+    this.bindRangeAndNumber(panel, 'targetSize', 'targetSizeVal', 'targetSize');
+    this.bindRangeAndNumber(panel, 'spawnSpeed', 'spawnSpeedVal', 'spawnSpeed');
+    this.bindRangeAndNumber(panel, 'moveSpeed', 'moveSpeedVal', 'movementSpeed');
+    return panel;
+  }
+
+  bindRangeAndNumber(panel, rangeId, numberId, settingKey) {
+    const rangeInput = panel.querySelector(`#${rangeId}`);
+    const numberInput = panel.querySelector(`#${numberId}`);
+    const syncValue = (raw) => {
+      const value = parseFloat(raw);
+      if (Number.isNaN(value)) return;
+      rangeInput.value = value;
+      numberInput.value = value;
+      this.settings[settingKey] = value;
+      Storage.set(`settings.${settingKey}`, value);
     };
-    sync(tRange, tNum, 'targetSize');
-    sync(sRange, sNum, 'spawnSpeed');
-    sync(mRange, mNum, 'movementSpeed');
-    this.uiRoot.appendChild(div);
+    rangeInput.addEventListener('input', (event) => syncValue(event.target.value));
+    numberInput.addEventListener('change', (event) => syncValue(event.target.value));
   }
 
   pause() {
     this.isRunning = false;
     this.input.unlock();
-    this.uiRoot.innerHTML = '';
-    this.menu = new Menu(this.uiRoot, this, { showResume: true });
+    this.crosshair.style.display = 'none';
+    this.showMainMenu(true);
+  }
+
+  resume() {
+    if (!this.currentMode) return;
+    this.overlay.close();
+    this.isRunning = true;
+    this.crosshair.style.display = 'block';
+    try {
+      this.renderer.canvas.requestPointerLock();
+    } catch (error) {
+      // no-op
+    }
   }
 
   restart() {
-    if (this.currentMode && this.isRunning) {
-      this.currentMode.end();
-      this.startMode(this.currentMode.constructor);
-    }
+    if (!this.currentMode) return;
+    const ModeClass = this.currentMode.constructor;
+    const name = this.currentModeName || ModeClass.name;
+    this.startMode(ModeClass, name);
   }
 
   animate(time) {
-    requestAnimationFrame((t) => this.animate(t));
+    requestAnimationFrame((nextTime) => this.animate(nextTime));
+    this.updateFPSCounter(time);
 
-    // FPS Counter
-    this.frameCount++;
-    if (time - this.lastTime >= 1000) {
-      this.fps = this.frameCount;
-      this.frameCount = 0;
-      this.lastTime = time;
-    }
-
-    if (this.isRunning && this.input.isLocked) {
-      // Rotate camera
-      const dx = this.input.mouse.x * this.settings.sensitivity * 0.002;
-      const invertMul = this.settings.invertY ? 1 : -1;
-      const dy = this.input.mouse.y * this.settings.sensitivity * 0.002 * invertMul;
-      this.camera.instance.rotation.y -= dx;
-      this.camera.instance.rotation.x -= dy;
-      this.camera.instance.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.camera.instance.rotation.x));
-
-      // reset mouse deltas after applying
-      this.input.mouse.x = 0;
-      this.input.mouse.y = 0;
-
-      // Update game mode
+    if (this.isRunning && this.input.isLocked && this.currentMode) {
+      this.updateCameraFromMouse();
       this.currentMode.update();
-
-      // Update HUD
-      this.hud.update({
-        score: this.currentMode.score,
-        accuracy: this.currentMode.shots ? (this.currentMode.hits / this.currentMode.shots) * 100 : 0,
-        combo: this.currentMode.combo
-      });
+      this.updateHUD();
     }
 
     this.renderer.render(this.scene.scene, this.camera.instance);
   }
 
+  updateFPSCounter(time) {
+    this.frameCount += 1;
+    if (time - this.lastTime < 1000) return;
+    this.fps = this.frameCount;
+    this.frameCount = 0;
+    this.lastTime = time;
+  }
+
+  updateCameraFromMouse() {
+    const sensitivityMultiplier = this.settings.sensitivity * 0.002;
+    const dx = this.input.mouse.x * sensitivityMultiplier;
+    const dy = this.input.mouse.y * sensitivityMultiplier * (this.settings.invertY ? 1 : -1);
+    this.camera.instance.rotation.y -= dx;
+    this.camera.instance.rotation.x -= dy;
+    this.camera.instance.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.camera.instance.rotation.x));
+    this.input.mouse.x = 0;
+    this.input.mouse.y = 0;
+  }
+
+  updateHUD() {
+    const shots = this.currentMode.shots || 0;
+    const hits = this.currentMode.hits || 0;
+    this.hud.update({
+      score: this.currentMode.score || 0,
+      accuracy: shots > 0 ? (hits / shots) * 100 : 0,
+      combo: this.currentMode.combo || 0
+    });
+    this.hud.setFPS(this.fps);
+  }
+
   applySettings() {
     this.camera.updateFOV(this.settings.fov);
-    const ch = this.settings.crosshair;
-    this.crosshair.style.width = `${ch.dot ? 2 : ch.size}px`;
-    this.crosshair.style.height = `${ch.dot ? 2 : ch.size}px`;
-    this.crosshair.style.border = ch.dot ? 'none' : `${ch.thickness}px solid ${ch.color}`;
-    this.crosshair.style.backgroundColor = ch.dot ? ch.color : 'transparent';
-    this.crosshair.classList.toggle('dot', ch.dot);
+    const crosshair = this.settings.crosshair;
+    this.crosshair.style.width = `${crosshair.dot ? 2 : crosshair.size}px`;
+    this.crosshair.style.height = `${crosshair.dot ? 2 : crosshair.size}px`;
+    this.crosshair.style.border = crosshair.dot ? 'none' : `${crosshair.thickness}px solid ${crosshair.color}`;
+    this.crosshair.style.backgroundColor = crosshair.dot ? crosshair.color : 'transparent';
+    this.crosshair.classList.toggle('dot', crosshair.dot);
     this.audio.setVolume(this.settings.volume);
   }
 
   showSettings() {
-    new Settings(this.uiRoot, this);
+    const settingsModal = new Settings(document.createElement('div'), this);
+    this.overlay.show(settingsModal.el);
   }
 
   showStats() {
-    new StatsUI(this.uiRoot, this);
+    const statsModal = new StatsUI(document.createElement('div'), this);
+    this.overlay.show(statsModal.el);
   }
 }

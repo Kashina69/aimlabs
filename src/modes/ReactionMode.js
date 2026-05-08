@@ -39,6 +39,7 @@ export class ReactionMode {
       this.game.audio.play('hit');
       this.target.deactivate();
       this.game.pool.release(this.target);
+      this.target = null;
       // spawn again after short delay
       const id = setTimeout(() => { this.waiting = true; const d = Math.random()*2000+300; const id2 = setTimeout(()=>this.spawn(), d); this._timers.push(id2); }, 400);
       this._timers.push(id);

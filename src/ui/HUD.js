@@ -25,4 +25,8 @@ export class HUD {
     this.element.querySelector('#combo').textContent = state.combo || 0;
     this.element.querySelector('#sensi-val').textContent = this.game.settings.sensitivity.toFixed(2);
   }
+
+  setFPS(fps) {
+    this.element.querySelector('#fps').textContent = `${fps || 0}`;
+  }
 }

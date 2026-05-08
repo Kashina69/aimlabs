@@ -53,6 +53,10 @@ export class Settings {
   }
 
   close() {
+    if (this.game?.overlay) {
+      this.game.overlay.close();
+      return;
+    }
     this.el.remove();
   }
 }
