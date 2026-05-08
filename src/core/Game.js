@@ -12,6 +12,7 @@ import { Menu } from '../ui/Menu.js';
 import { HUD } from '../ui/HUD.js';
 import { Settings } from '../ui/Settings.js';
 import { StatsUI } from '../ui/Stats.js';
+import { StatsManager } from '../utils/StatsManager.js';
 
 // Modes
 import { StaticMode } from '../modes/StaticMode.js';
@@ -52,7 +53,7 @@ export class Game {
     this.crosshair.style.display = 'none';
     // create initial menu immediately so user can start
     try {
-      this.menu = new Menu(this.uiRoot, this);
+      this.menu = new Menu(this.uiRoot, this, { showResume: false });
     } catch (e) {
       // if Menu isn't available yet, create a simple fallback
       const el = document.createElement('div');
@@ -69,6 +70,13 @@ export class Game {
     this.gunEl.style.cssText = 'position:absolute; left:50%; bottom:6%; transform:translateX(-50%); width:140px; height:60px; pointer-events:none; z-index:9998;';
     this.gunEl.innerHTML = '<div id="gun-bar" style="width:100px;height:24px;background:linear-gradient(#222,#111);margin:0 auto;border-radius:6px;box-shadow:0 0 10px rgba(0,255,255,0.08);"></div>';
     this.uiRoot.appendChild(this.gunEl);
+
+    // add a visible gun sprite centered near bottom
+    this.gunSprite = document.createElement('div');
+    this.gunSprite.id = 'gun-sprite';
+    this.gunSprite.style.cssText = 'position:absolute; left:50%; bottom:4%; transform:translateX(-50%); width:220px; height:120px; pointer-events:none; z-index:9997;';
+    this.gunSprite.innerHTML = '<div class="gun-body"></div>';
+    this.uiRoot.appendChild(this.gunSprite);
 
     // muzzle flash
     this.muzzle = document.createElement('div');
@@ -98,7 +106,9 @@ export class Game {
   init() {
     this.bindEvents();
     this.hud = new HUD(this.uiRoot, this);
-    this.menu = new Menu(this.uiRoot, this);
+    // if returning from pause, show resume option
+    const showResume = !!(this.currentMode && !this.isRunning);
+    this.menu = new Menu(this.uiRoot, this, { showResume });
     this.applySettings();
 
     this.animate(0);
@@ -112,11 +122,23 @@ export class Game {
     });
 
     document.addEventListener('keydown', (e) => {
-      if (e.code === 'Escape' && this.isRunning) {
-        this.pause();
+      // first close active modal if present
+      if (e.code === 'Escape') {
+        if (this.currentModal) {
+          try { this.currentModal.remove(); } catch(e) {}
+          this.currentModal = null;
+          return;
+        }
+        if (this.isRunning) { this.pause(); return; }
       }
       if (e.code === 'KeyR') {
         this.restart();
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.isRunning) {
+        this.pause(true);
       }
     });
 
@@ -145,23 +167,41 @@ export class Game {
     const intersects = raycaster.intersectObjects(this.pool.objects.map(t => t.mesh).filter(m => m.visible));
     if (intersects.length > 0) {
       this.currentMode.onClick(intersects);
-      // flash hit marker
-      this.hitMarker.style.borderColor = 'rgba(0,255,255,0.9)';
-      setTimeout(() => { this.hitMarker.style.borderColor = 'rgba(0,255,255,0.0)'; }, 120);
+      this.triggerHit(true);
     } else {
       this.currentMode.onClick([]);
-      // small miss flash
-      this.hitMarker.style.borderColor = 'rgba(255,50,50,0.8)';
-      setTimeout(() => { this.hitMarker.style.borderColor = 'rgba(0,255,255,0.0)'; }, 120);
+      this.triggerHit(false);
     }
   }
 
+  triggerHit(hit = true) {
+    try {
+      this.hitMarker.classList.add(hit ? 'hit' : 'miss');
+      setTimeout(() => { this.hitMarker.classList.remove('hit'); this.hitMarker.classList.remove('miss'); }, 160);
+    } catch (e) {}
+  }
+
   startMode(ModeClass) {
+    // clean previous mode state
+    if (this.currentMode) {
+      try {
+        const summary = this.currentMode.end && this.currentMode.end();
+        if (summary) {
+          const session = Object.assign({ mode: this.currentMode.constructor.name, start: this.sessionStart || Date.now(), end: Date.now() }, summary);
+          try { StatsManager.push(session); } catch (e) {}
+        }
+      } catch(e){}
+    }
+    // release any active targets to avoid leftover objects
+    this.clearActiveTargets();
+
     if (this.menu && this.menu.element) {
       try { this.menu.element.remove(); } catch(e){}
     }
     this.currentMode = new ModeClass(this);
     this.currentMode.start();
+    // mark session start
+    this.sessionStart = Date.now();
     this.isRunning = true;
     this.crosshair.style.display = 'block';
     this.hitMarker.style.borderColor = 'rgba(0,255,255,0.0)';
@@ -171,22 +211,45 @@ export class Game {
         this.renderer.canvas.requestPointerLock();
       }
     } catch (e) {}
+    // clear any modal reference
+    this.currentModal = null;
+  }
+
+  clearActiveTargets() {
+    try {
+      if (this.pool && this.pool.active) {
+        for (const t of Array.from(this.pool.active)) {
+          try { this.pool.release(t); } catch(e) {}
+        }
+      }
+    } catch (e) {}
   }
 
   async showModeSelect() {
-    this.menu.hide();
+    // clear UI so modal sits alone (prevents underlying menus showing through)
+    this.uiRoot.innerHTML = '';
+    try { this.menu.hide(); } catch(e) {}
     const div = document.createElement('div');
     div.className = 'glass';
     div.style.cssText = `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px;`;
     div.innerHTML = `<h3 class="neon-text">Select Mode</h3>`;
-    const modes = {
-      Static: StaticMode,
-      Flick: (await import('../modes/FlickMode.js')).FlickMode,
-      Grid: (await import('../modes/GridMode.js')).GridMode,
-      Tracking: (await import('../modes/TrackingMode.js')).TrackingMode,
-      Reaction: (await import('../modes/ReactionMode.js')).ReactionMode,
-      Strafing: (await import('../modes/StrafingMode.js')).StrafingMode,
+
+    // Build mode list robustly so one failing dynamic import doesn't block others
+    const modes = { Static: StaticMode };
+    const tryImport = async (path, key) => {
+      try {
+        const mod = await import(path);
+        if (mod && mod[key]) modes[key.replace('Mode','')] = mod[key];
+      } catch (err) {
+        console.warn('Mode import failed', path, err);
+      }
     };
+
+    await Promise.all([
+      tryImport('../modes/FlickMode.js', 'FlickMode'),
+      tryImport('../modes/TrackingMode.js', 'TrackingMode'),
+      tryImport('../modes/ReactionMode.js', 'ReactionMode')
+    ]);
 
     for (const [name, Mode] of Object.entries(modes)) {
       const btn = document.createElement('button');
@@ -199,6 +262,8 @@ export class Game {
       };
       div.appendChild(btn);
     }
+    // attach as current modal for ESC handling
+    this.currentModal = div;
 
     // difficulty controls
     const diff = document.createElement('div');
@@ -212,8 +277,8 @@ export class Game {
     div.appendChild(diff);
 
     diff.querySelector('#targetSize').addEventListener('input', (e) => { this.settings.targetSize = parseFloat(e.target.value); Storage.set('settings.targetSize', this.settings.targetSize); });
-    diff.querySelector('#spawnSpeed').addEventListener('input', (e) => { this.settings.spawnSpeed = parseFloat(e.target.value); });
-    diff.querySelector('#moveSpeed').addEventListener('input', (e) => { this.settings.movementSpeed = parseFloat(e.target.value); });
+    diff.querySelector('#spawnSpeed').addEventListener('input', (e) => { this.settings.spawnSpeed = parseFloat(e.target.value); Storage.set('settings.spawnSpeed', this.settings.spawnSpeed); });
+    diff.querySelector('#moveSpeed').addEventListener('input', (e) => { this.settings.movementSpeed = parseFloat(e.target.value); Storage.set('settings.movementSpeed', this.settings.movementSpeed); });
     this.uiRoot.appendChild(div);
   }
 
@@ -221,7 +286,7 @@ export class Game {
     this.isRunning = false;
     this.input.unlock();
     this.uiRoot.innerHTML = '';
-    this.menu = new Menu(this.uiRoot, this);
+    this.menu = new Menu(this.uiRoot, this, { showResume: true });
   }
 
   restart() {

@@ -60,6 +60,20 @@ body {
 
 #hit-marker {
   border-color: rgba(0,255,255,0.0);
+  transition: transform 0.16s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+#hit-marker.hit {
+  transform: translate(-50%, -50%) scale(0.88) rotate(8deg);
+  border-color: rgba(0,255,255,0.95);
+  box-shadow: 0 0 18px rgba(0,255,255,0.6);
+}
+
+#hit-marker.miss {
+  transform: translate(-50%, -50%) scale(1.05) rotate(-6deg);
+  border-color: rgba(255,80,80,0.9);
+  box-shadow: 0 0 12px rgba(255,80,80,0.42);
 }
 
 .glass {
@@ -90,6 +104,14 @@ body {
   background: rgba(0, 255, 255, 0.2);
   transform: scale(1.05);
 }
+
+#gun-sprite { display:block; }
+.gun-body {
+  width: 160px; height: 56px; margin: 52px auto 0; border-radius: 10px; background: linear-gradient(90deg,#222,#111); box-shadow: 0 6px 18px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.02); position: relative;
+}
+.gun-body::after { content:''; position:absolute; right:14px; top:12px; width:36px; height:24px; background:linear-gradient(90deg,#444,#222); border-radius:4px; }
+
+#gun-hud { pointer-events:none; }
 
 .hidden {
   display: none !important;

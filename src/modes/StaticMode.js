@@ -12,7 +12,11 @@ export class StaticMode {
   }
 
   start() {
-    this.game.pool.objects.forEach(t => this.game.pool.release(t));
+    // release any existing targets and spawn fresh
+    if (this.game.pool && this.game.pool.active) {
+      for (const t of Array.from(this.game.pool.active)) this.game.pool.release(t);
+    }
+    this._timers = [];
     this.spawnTarget();
   }
 
@@ -68,6 +72,11 @@ export class StaticMode {
   }
 
   end() {
+    // release targets and clear timers
+    for (const t of Array.from(this.targets || [])) {
+      try { if (t.active) t.deactivate(); this.game.pool.release(t); } catch(e){}
+    }
+    (this._timers || []).forEach(id => clearTimeout(id));
     return {
       accuracy: this.shots > 0 ? (this.hits / this.shots) * 100 : 0,
       score: this.score,

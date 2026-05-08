@@ -9,6 +9,9 @@ export class AudioManager {
   constructor() {
     this.ctx = null;
     this.volume = Storage.get('audio.volume', 0.7);
+    this.buffers = {};
+    // attempt to load local assets (optional). Files should be placed at assets/sounds/{shoot,hit}.wav
+    try { this._loadSample('shoot', 'assets/sounds/shoot.wav'); this._loadSample('hit', 'assets/sounds/hit.wav'); } catch(e){}
   }
 
   ensureContext() {
@@ -20,8 +23,22 @@ export class AudioManager {
   play(name) {
     this.ensureContext();
     const t = this.ctx.currentTime;
+    // if buffer is loaded, play it
+    if (this.buffers[name]) {
+      try {
+        const src = this.ctx.createBufferSource();
+        src.buffer = this.buffers[name];
+        const g = this.ctx.createGain();
+        g.gain.value = Math.min(1, this.volume);
+        src.connect(g); g.connect(this.ctx.destination);
+        src.start();
+        return;
+      } catch (e) {
+        // fall back to tones
+      }
+    }
+
     if (name === 'hit') {
-      // layered hit: quick high click + short low thud
       this._beep(1200, 0.02);
       setTimeout(() => this._beep(520, 0.06), 30);
     } else if (name === 'miss') {
@@ -35,9 +52,21 @@ export class AudioManager {
       this._beep(1000, 0.12);
       setTimeout(() => this._beep(1400, 0.08), 120);
     } else if (name === 'shoot') {
-      // short muzzle pop
       this._beep(1800, 0.01);
       setTimeout(() => this._beep(700, 0.03), 10);
+    }
+  }
+
+  async _loadSample(name, url) {
+    try {
+      this.ensureContext();
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('no asset');
+      const ab = await res.arrayBuffer();
+      const buf = await this.ctx.decodeAudioData(ab.slice(0));
+      this.buffers[name] = buf;
+    } catch (e) {
+      // asset not available — silence this error
     }
   }
 

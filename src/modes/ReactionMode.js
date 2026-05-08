@@ -6,12 +6,14 @@ export class ReactionMode {
     this.target = null;
     this.score = 0; this.hits = 0; this.shots = 0;
     this.waiting = true;
+    this._timers = [];
   }
 
   start() {
     this.waiting = true;
     const delay = Math.random() * 2000 + 500;
-    setTimeout(() => this.spawn(), delay);
+    const id = setTimeout(() => this.spawn(), delay);
+    this._timers.push(id);
     this.startTime = performance.now();
   }
 
@@ -36,12 +38,22 @@ export class ReactionMode {
       this.score += Math.max(0, 2000 - rt);
       this.game.audio.play('hit');
       this.target.deactivate();
+      this.game.pool.release(this.target);
       // spawn again after short delay
-      setTimeout(() => { this.waiting = true; const d = Math.random()*2000+300; setTimeout(()=>this.spawn(), d); }, 400);
+      const id = setTimeout(() => { this.waiting = true; const d = Math.random()*2000+300; const id2 = setTimeout(()=>this.spawn(), d); this._timers.push(id2); }, 400);
+      this._timers.push(id);
     } else {
       this.game.audio.play('miss');
     }
   }
 
-  end() { return {score:this.score}; }
+  end() {
+    (this._timers || []).forEach(id => clearTimeout(id));
+    this._timers = [];
+    if (this.target) {
+      try { if (this.target.active) this.target.deactivate(); this.game.pool.release(this.target); } catch(e){}
+      this.target = null;
+    }
+    return {score:this.score, hits:this.hits, shots:this.shots};
+  }
 }

@@ -8,6 +8,7 @@ export class FlickMode {
     this.hits = 0;
     this.shots = 0;
     this.combo = 0;
+    this._timers = [];
   }
 
   start() {
@@ -25,9 +26,10 @@ export class FlickMode {
     this.game.scene.scene.add(t.mesh);
     this.targets.push(t);
     // short lifetime
-    setTimeout(() => {
-      if (t.active) { t.deactivate(); }
+    const id = setTimeout(() => {
+      if (t.active) { t.deactivate(); this.game.pool.release(t); }
     }, Math.max(400, 1200 - (this.game.settings.spawnSpeed || 0) * 200));
+    this._timers.push(id);
   }
 
   update() {
@@ -43,6 +45,7 @@ export class FlickMode {
       const target = this.targets.find(t => t.mesh === i.object);
       if (target) {
         target.deactivate();
+        this.game.pool.release(target);
         this.hits++;
         this.combo++;
         this.score += 100 * this.combo;
@@ -55,6 +58,12 @@ export class FlickMode {
   }
 
   end() {
+    // clear timers and release owned targets
+    this._timers.forEach(id => clearTimeout(id));
+    this._timers = [];
+    for (const t of Array.from(this.targets || [])) {
+      try { if (t.active) t.deactivate(); this.game.pool.release(t); } catch(e){}
+    }
     return { accuracy: this.shots ? (this.hits / this.shots) * 100 : 0, score: this.score };
   }
 }

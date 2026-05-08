@@ -1,5 +1,5 @@
 export class Menu {
-  constructor(container, game) {
+  constructor(container, game, options = {}) {
     this.container = container;
     this.game = game;
     this.element = document.createElement('div');
@@ -12,16 +12,17 @@ export class Menu {
       min-width: 300px;
       text-align: center;
     `;
-    this.build();
+    this.build(options);
     this.container.appendChild(this.element);
   }
 
-  build() {
+  build(options = {}) {
     this.element.innerHTML = `
       <h2 class="neon-text">AimTrainer.js</h2>
       <button class="btn" data-action="start">Start Training</button>
       <button class="btn" data-action="settings">Settings</button>
       <button class="btn" data-action="stats">Stats</button>
+      ${options.showResume ? '<button class="btn" data-action="resume">Resume</button>' : ''}
     `;
 
     this.element.querySelectorAll('.btn').forEach(btn => {
@@ -31,6 +32,7 @@ export class Menu {
         if (action === 'start') this.game.showModeSelect();
         if (action === 'settings') this.game.showSettings();
         if (action === 'stats') this.game.showStats();
+        if (action === 'resume') this.game.resume && this.game.resume();
       });
     });
 
@@ -50,6 +52,6 @@ export class Menu {
     this.element.style.transition = 'opacity 0.28s ease, transform 0.28s ease';
     this.element.style.opacity = '0';
     this.element.style.transform = 'translateY(-20px)';
-    setTimeout(() => this.element.classList.add('hidden'), 300);
+    setTimeout(() => { try { this.element.remove(); } catch(e) {} }, 300);
   }
 }

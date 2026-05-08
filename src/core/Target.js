@@ -26,6 +26,8 @@ export class Target {
     this.health = health;
     this.maxHealth = health;
     this.mesh.geometry = new THREE.SphereGeometry(size, 16, 16);
+    // attach back-reference so raycast hits can map to target objects reliably
+    this.mesh.userData.target = this;
   }
 
   takeDamage(damage = 1) {

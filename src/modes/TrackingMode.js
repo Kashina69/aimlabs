@@ -28,11 +28,20 @@ export class TrackingMode {
     for (const i of intersects) {
       if (i.object === this.target.mesh) {
         this.hits++; this.combo++; this.score += 150 * this.combo; this.game.audio.play('hit');
+        this.target.deactivate();
+        this.game.pool.release(this.target);
+        this.target = null;
         return;
       }
     }
     this.combo = 0; this.game.audio.play('miss');
   }
 
-  end() { return {score:this.score, accuracy: this.shots? (this.hits/this.shots)*100:0}; }
+  end() {
+    if (this.target) {
+      try { if (this.target.active) this.target.deactivate(); this.game.pool.release(this.target); } catch(e){}
+      this.target = null;
+    }
+    return {score:this.score, accuracy: this.shots? (this.hits/this.shots)*100:0};
+  }
 }
