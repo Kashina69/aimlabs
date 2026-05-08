@@ -88,6 +88,7 @@ python3 -m http.server 8001
 - **Difficulty controls:** Spawn speed, movement speed and target size sliders persist to settings and are used by modes. (`src/core/Game.js`)
 - **Stats:** Added `StatsManager` and improved `StatsUI` with session list and lightweight chart. (`src/utils/StatsManager.js`, `src/ui/Stats.js`)
 - **Modal/ESC handling:** Modal stack handling improved; `Esc` closes top modal or pauses game; page visibility auto-pauses the game.
+ - **Precise numeric controls:** All sliders in the Settings and Mode difficulty panels now have adjacent editable numeric inputs allowing decimal values (bidirectionally synced with sliders). (`src/ui/Settings.js`, `src/core/Game.js`)
 
 **Manual next steps for other devs/AI agents**
 - To add real audio: place `shoot.wav` and `hit.wav` in `assets/sounds/` (or update `AudioManager._loadSample` paths) and refresh the page.

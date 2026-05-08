@@ -270,15 +270,25 @@ export class Game {
     diff.style.marginTop = '12px';
     diff.innerHTML = `
       <div style="margin-top:8px">Difficulty: <select id="diff-select"><option>Easy</option><option selected>Medium</option><option>Hard</option><option>Insane</option></select></div>
-      <label>Target size: <input id="targetSize" type="range" min="0.07" max="1.2" step="0.01" value="${this.settings.targetSize}"></label>
-      <label>Spawn speed: <input id="spawnSpeed" type="range" min="0" max="5" step="0.1" value="1"></label>
-      <label>Movement speed: <input id="moveSpeed" type="range" min="0" max="3" step="0.05" value="1"></label>
+      <div style="margin-top:6px">Target size: <input id="targetSize" type="range" min="0.01" max="2" step="0.01" value="${this.settings.targetSize}"> <input id="targetSizeVal" type="number" step="0.01" value="${this.settings.targetSize}" style="width:72px; margin-left:8px"></div>
+      <div>Spawn speed: <input id="spawnSpeed" type="range" min="0" max="5" step="0.01" value="${this.settings.spawnSpeed||1}"> <input id="spawnSpeedVal" type="number" step="0.01" value="${this.settings.spawnSpeed||1}" style="width:72px; margin-left:8px"></div>
+      <div>Movement speed: <input id="moveSpeed" type="range" min="0" max="3" step="0.01" value="${this.settings.movementSpeed||1}"> <input id="moveSpeedVal" type="number" step="0.01" value="${this.settings.movementSpeed||1}" style="width:72px; margin-left:8px"></div>
     `;
     div.appendChild(diff);
 
-    diff.querySelector('#targetSize').addEventListener('input', (e) => { this.settings.targetSize = parseFloat(e.target.value); Storage.set('settings.targetSize', this.settings.targetSize); });
-    diff.querySelector('#spawnSpeed').addEventListener('input', (e) => { this.settings.spawnSpeed = parseFloat(e.target.value); Storage.set('settings.spawnSpeed', this.settings.spawnSpeed); });
-    diff.querySelector('#moveSpeed').addEventListener('input', (e) => { this.settings.movementSpeed = parseFloat(e.target.value); Storage.set('settings.movementSpeed', this.settings.movementSpeed); });
+    const tRange = diff.querySelector('#targetSize');
+    const tNum = diff.querySelector('#targetSizeVal');
+    const sRange = diff.querySelector('#spawnSpeed');
+    const sNum = diff.querySelector('#spawnSpeedVal');
+    const mRange = diff.querySelector('#moveSpeed');
+    const mNum = diff.querySelector('#moveSpeedVal');
+    const sync = (r, n, key) => {
+      r.addEventListener('input', (e) => { const v = parseFloat(e.target.value); n.value = v; this.settings[key] = v; Storage.set(`settings.${key}`, v); });
+      n.addEventListener('change', (e) => { const v = parseFloat(e.target.value); r.value = v; this.settings[key] = v; Storage.set(`settings.${key}`, v); });
+    };
+    sync(tRange, tNum, 'targetSize');
+    sync(sRange, sNum, 'spawnSpeed');
+    sync(mRange, mNum, 'movementSpeed');
     this.uiRoot.appendChild(div);
   }
 

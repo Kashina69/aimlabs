@@ -14,10 +14,10 @@ export class Settings {
   build() {
     this.el.innerHTML = `
       <h3 class="neon-text">Settings</h3>
-      <div>FOV: <input id="fov" type="range" min="60" max="120" value="${this.game.settings.fov}"> <span id="fov-val">${this.game.settings.fov}</span></div>
-      <div>Sensitivity: <input id="sensi" type="range" min="0.2" max="6" step="0.1" value="${this.game.settings.sensitivity}"> <span id="sensi-val">${this.game.settings.sensitivity}</span></div>
-      <div style="margin-top:8px">Crosshair size: <input id="ch-size" type="range" min="2" max="28" value="${this.game.settings.crosshair.size}"> <span id="ch-size-val">${this.game.settings.crosshair.size}</span></div>
-      <div>Crosshair thickness: <input id="ch-thick" type="range" min="0" max="6" value="${this.game.settings.crosshair.thickness}"> <span id="ch-thick-val">${this.game.settings.crosshair.thickness}</span></div>
+      <div>FOV: <input id="fov" type="range" min="60" max="120" value="${this.game.settings.fov}"> <input id="fov-num" type="number" step="0.1" value="${this.game.settings.fov}" style="width:72px; margin-left:8px"></div>
+      <div>Sensitivity: <input id="sensi" type="range" min="0.01" max="12" step="0.01" value="${this.game.settings.sensitivity}"> <input id="sensi-num" type="number" step="0.01" value="${this.game.settings.sensitivity}" style="width:72px; margin-left:8px"></div>
+      <div style="margin-top:8px">Crosshair size: <input id="ch-size" type="range" min="0.1" max="60" step="0.1" value="${this.game.settings.crosshair.size}"> <input id="ch-size-num" type="number" step="0.1" value="${this.game.settings.crosshair.size}" style="width:72px; margin-left:8px"></div>
+      <div>Crosshair thickness: <input id="ch-thick" type="range" min="0" max="12" step="0.1" value="${this.game.settings.crosshair.thickness}"> <input id="ch-thick-num" type="number" step="0.1" value="${this.game.settings.crosshair.thickness}" style="width:72px; margin-left:8px"></div>
       <div>Crosshair color: <input id="ch-color" type="color" value="${this.game.settings.crosshair.color}"></div>
       <div><label><input id="ch-dot" type="checkbox" ${this.game.settings.crosshair.dot ? 'checked' : ''}/> Dot</label></div>
       <div style="margin-top:8px"><label><input id="invertY" type="checkbox" ${this.game.settings.invertY ? 'checked' : ''}/> Invert Y</label></div>
@@ -26,30 +26,26 @@ export class Settings {
 
     this.el.querySelector('#close').addEventListener('click', () => this.close());
     const fovEl = this.el.querySelector('#fov');
-    const fovVal = this.el.querySelector('#fov-val');
-    fovEl.addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      fovVal.textContent = v;
-      this.game.settings.fov = v;
-      Storage.set('settings.fov', v);
-      this.game.camera.updateFOV(v);
-      this.game.audio.play('click');
-    });
+    const fovVal = this.el.querySelector('#fov-num');
+    const syncFov = (v) => { fovEl.value = v; fovVal.value = v; this.game.settings.fov = parseFloat(v); Storage.set('settings.fov', parseFloat(v)); this.game.camera.updateFOV(parseFloat(v)); };
+    fovEl.addEventListener('input', (e) => { const v = e.target.value; syncFov(v); this.game.audio.play('click'); });
+    fovVal.addEventListener('change', (e) => { const v = e.target.value; syncFov(v); });
 
     const sensEl = this.el.querySelector('#sensi');
-    const sensVal = this.el.querySelector('#sensi-val');
-    sensEl.addEventListener('input', (e) => {
-      const v = parseFloat(e.target.value);
-      sensVal.textContent = v;
-      this.game.settings.sensitivity = v;
-      Storage.set('settings.sensitivity', v);
-    });
+    const sensVal = this.el.querySelector('#sensi-num');
+    const syncSens = (v) => { sensEl.value = v; sensVal.value = v; this.game.settings.sensitivity = parseFloat(v); Storage.set('settings.sensitivity', parseFloat(v)); };
+    sensEl.addEventListener('input', (e) => { syncSens(e.target.value); });
+    sensVal.addEventListener('change', (e) => { syncSens(e.target.value); });
     const chSize = this.el.querySelector('#ch-size');
-    const chSizeVal = this.el.querySelector('#ch-size-val');
-    chSize.addEventListener('input', (e) => { this.game.settings.crosshair.size = parseInt(e.target.value); chSizeVal.textContent = e.target.value; Storage.set('settings.crosshair', this.game.settings.crosshair); this.game.applySettings(); });
+    const chSizeVal = this.el.querySelector('#ch-size-num');
+    const syncChSize = (v) => { chSize.value = v; chSizeVal.value = v; this.game.settings.crosshair.size = parseFloat(v); Storage.set('settings.crosshair', this.game.settings.crosshair); this.game.applySettings(); };
+    chSize.addEventListener('input', (e) => { syncChSize(e.target.value); });
+    chSizeVal.addEventListener('change', (e) => { syncChSize(e.target.value); });
     const chThick = this.el.querySelector('#ch-thick');
-    const chThickVal = this.el.querySelector('#ch-thick-val');
-    chThick.addEventListener('input', (e) => { this.game.settings.crosshair.thickness = parseInt(e.target.value); chThickVal.textContent = e.target.value; Storage.set('settings.crosshair', this.game.settings.crosshair); this.game.applySettings(); });
+    const chThickVal = this.el.querySelector('#ch-thick-num');
+    const syncChThick = (v) => { chThick.value = v; chThickVal.value = v; this.game.settings.crosshair.thickness = parseFloat(v); Storage.set('settings.crosshair', this.game.settings.crosshair); this.game.applySettings(); };
+    chThick.addEventListener('input', (e) => { syncChThick(e.target.value); });
+    chThickVal.addEventListener('change', (e) => { syncChThick(e.target.value); });
     this.el.querySelector('#ch-color').addEventListener('input', (e) => { this.game.settings.crosshair.color = e.target.value; Storage.set('settings.crosshair', this.game.settings.crosshair); this.game.applySettings(); });
     this.el.querySelector('#ch-dot').addEventListener('change', (e) => { this.game.settings.crosshair.dot = e.target.checked; Storage.set('settings.crosshair', this.game.settings.crosshair); this.game.applySettings(); });
     const inv = this.el.querySelector('#invertY');
