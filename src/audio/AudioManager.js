@@ -21,7 +21,9 @@ export class AudioManager {
     this.ensureContext();
     const t = this.ctx.currentTime;
     if (name === 'hit') {
-      this._beep(880, 0.06);
+      // layered hit: quick high click + short low thud
+      this._beep(1200, 0.02);
+      setTimeout(() => this._beep(520, 0.06), 30);
     } else if (name === 'miss') {
       this._beep(220, 0.08);
     } else if (name === 'click') {
@@ -32,6 +34,10 @@ export class AudioManager {
     } else if (name === 'complete') {
       this._beep(1000, 0.12);
       setTimeout(() => this._beep(1400, 0.08), 120);
+    } else if (name === 'shoot') {
+      // short muzzle pop
+      this._beep(1800, 0.01);
+      setTimeout(() => this._beep(700, 0.03), 10);
     }
   }
 
@@ -56,3 +62,14 @@ export class AudioManager {
     Storage.set('audio.volume', vol);
   }
 }
+
+/*
+If you prefer to use external samples instead of generated tones, uncomment Howler usage and
+place assets under `assets/sounds/` or use remote CDN links. Example free sources:
+- https://freesound.org (search CC0/Creative Commons with attribution as needed)
+- https://github.com (raw links to small WAVs)
+
+Example (commented):
+import { Howl } from 'https://unpkg.com/howler@2.2.4/dist/howler.es.js';
+this.sounds = { shoot: new Howl({src:['assets/sounds/shoot.wav']}) }
+*/

@@ -23,8 +23,8 @@ export class Game {
     this.crosshair = document.getElementById('crosshair');
 
     this.camera = new Camera();
-    this.input = new Input(this.container);
     this.renderer = new Renderer();
+    this.input = new Input(this.renderer.canvas);
     this.scene = new GameScene();
     this.audio = new AudioManager();
 
@@ -42,6 +42,8 @@ export class Game {
     this.lastTime = 0;
 
     this.initUI();
+    // expose for debugging in browser console
+    try { window.game = this; } catch (e) {}
   }
 
   initUI() {
@@ -60,6 +62,25 @@ export class Game {
       this.uiRoot.appendChild(el);
       el.querySelector('#start-btn').addEventListener('click', () => this.showModeSelect());
     }
+
+    // create gun HUD element (simple, lightweight)
+    this.gunEl = document.createElement('div');
+    this.gunEl.id = 'gun-hud';
+    this.gunEl.style.cssText = 'position:absolute; left:50%; bottom:6%; transform:translateX(-50%); width:140px; height:60px; pointer-events:none; z-index:9998;';
+    this.gunEl.innerHTML = '<div id="gun-bar" style="width:100px;height:24px;background:linear-gradient(#222,#111);margin:0 auto;border-radius:6px;box-shadow:0 0 10px rgba(0,255,255,0.08);"></div>';
+    this.uiRoot.appendChild(this.gunEl);
+
+    // muzzle flash
+    this.muzzle = document.createElement('div');
+    this.muzzle.id = 'muzzle-flash';
+    this.muzzle.style.cssText = 'position:absolute; left:50%; bottom:18%; transform:translateX(-50%); width:60px; height:60px; border-radius:50%; background:radial-gradient(circle, rgba(255,255,200,0.9) 0%, rgba(255,200,0,0.6) 40%, transparent 60%); mix-blend-mode:screen; opacity:0; pointer-events:none; z-index:9999;';
+    this.uiRoot.appendChild(this.muzzle);
+
+    // hit marker
+    this.hitMarker = document.createElement('div');
+    this.hitMarker.id = 'hit-marker';
+    this.hitMarker.style.cssText = 'position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:140px; height:140px; border-radius:50%; border:2px solid rgba(0,255,255,0.0); pointer-events:none; transition: all 0.12s ease; z-index:10000;';
+    this.uiRoot.appendChild(this.hitMarker);
   }
 
   loadSettings() {
@@ -98,39 +119,74 @@ export class Game {
       }
     });
 
-    this.container.addEventListener('mousedown', (e) => {
-      if (!this.isRunning || !this.input.isLocked) return;
-      this.shoot();
-    });
+    // listen on the actual canvas for pointer-lock/headshot inputs
+    if (this.renderer && this.renderer.canvas) {
+      this.renderer.canvas.addEventListener('mousedown', (e) => {
+        if (!this.isRunning || !this.input.isLocked) return;
+        this.shoot();
+      });
+    }
   }
 
   shoot() {
+    // play shoot sound and show muzzle flash
+    this.audio.play('shoot');
+    this.muzzle.style.opacity = '1';
+    this.muzzle.style.transform = 'translateX(-50%) scale(1.1)';
+    setTimeout(() => { this.muzzle.style.opacity = '0'; this.muzzle.style.transform = 'translateX(-50%) scale(0.8)'; }, 80);
+
+    // small gun recoil effect
+    this.gunEl.querySelector('#gun-bar').style.transform = 'translateY(-6px) scaleX(0.98)';
+    setTimeout(() => { this.gunEl.querySelector('#gun-bar').style.transform = ''; }, 120);
+
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera({ x: 0, y: 0 }, this.camera.instance);
-
     const intersects = raycaster.intersectObjects(this.pool.objects.map(t => t.mesh).filter(m => m.visible));
     if (intersects.length > 0) {
       this.currentMode.onClick(intersects);
+      // flash hit marker
+      this.hitMarker.style.borderColor = 'rgba(0,255,255,0.9)';
+      setTimeout(() => { this.hitMarker.style.borderColor = 'rgba(0,255,255,0.0)'; }, 120);
     } else {
       this.currentMode.onClick([]);
+      // small miss flash
+      this.hitMarker.style.borderColor = 'rgba(255,50,50,0.8)';
+      setTimeout(() => { this.hitMarker.style.borderColor = 'rgba(0,255,255,0.0)'; }, 120);
     }
   }
 
   startMode(ModeClass) {
-    this.menu.element.remove();
+    if (this.menu && this.menu.element) {
+      try { this.menu.element.remove(); } catch(e){}
+    }
     this.currentMode = new ModeClass(this);
     this.currentMode.start();
     this.isRunning = true;
     this.crosshair.style.display = 'block';
+    this.hitMarker.style.borderColor = 'rgba(0,255,255,0.0)';
+    // request pointer lock on the canvas as this is triggered by a user gesture
+    try {
+      if (this.renderer && this.renderer.canvas) {
+        this.renderer.canvas.requestPointerLock();
+      }
+    } catch (e) {}
   }
 
-  showModeSelect() {
+  async showModeSelect() {
     this.menu.hide();
     const div = document.createElement('div');
     div.className = 'glass';
     div.style.cssText = `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px;`;
     div.innerHTML = `<h3 class="neon-text">Select Mode</h3>`;
-    const modes = { Static: StaticMode };
+    const modes = {
+      Static: StaticMode,
+      Flick: (await import('../modes/FlickMode.js')).FlickMode,
+      Grid: (await import('../modes/GridMode.js')).GridMode,
+      Tracking: (await import('../modes/TrackingMode.js')).TrackingMode,
+      Reaction: (await import('../modes/ReactionMode.js')).ReactionMode,
+      Strafing: (await import('../modes/StrafingMode.js')).StrafingMode,
+    };
+
     for (const [name, Mode] of Object.entries(modes)) {
       const btn = document.createElement('button');
       btn.className = 'btn';
@@ -142,6 +198,21 @@ export class Game {
       };
       div.appendChild(btn);
     }
+
+    // difficulty controls
+    const diff = document.createElement('div');
+    diff.style.marginTop = '12px';
+    diff.innerHTML = `
+      <div style="margin-top:8px">Difficulty: <select id="diff-select"><option>Easy</option><option selected>Medium</option><option>Hard</option><option>Insane</option></select></div>
+      <label>Target size: <input id="targetSize" type="range" min="0.07" max="1.2" step="0.01" value="${this.settings.targetSize}"></label>
+      <label>Spawn speed: <input id="spawnSpeed" type="range" min="0" max="5" step="0.1" value="1"></label>
+      <label>Movement speed: <input id="moveSpeed" type="range" min="0" max="3" step="0.05" value="1"></label>
+    `;
+    div.appendChild(diff);
+
+    diff.querySelector('#targetSize').addEventListener('input', (e) => { this.settings.targetSize = parseFloat(e.target.value); Storage.set('settings.targetSize', this.settings.targetSize); });
+    diff.querySelector('#spawnSpeed').addEventListener('input', (e) => { this.settings.spawnSpeed = parseFloat(e.target.value); });
+    diff.querySelector('#moveSpeed').addEventListener('input', (e) => { this.settings.movementSpeed = parseFloat(e.target.value); });
     this.uiRoot.appendChild(div);
   }
 
@@ -177,6 +248,10 @@ export class Game {
       this.camera.instance.rotation.y -= dx;
       this.camera.instance.rotation.x -= dy;
       this.camera.instance.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.camera.instance.rotation.x));
+
+      // reset mouse deltas after applying
+      this.input.mouse.x = 0;
+      this.input.mouse.y = 0;
 
       // Update game mode
       this.currentMode.update();

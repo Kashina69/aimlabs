@@ -49,6 +49,19 @@ body {
   height: 2px;
 }
 
+#gun-hud #gun-bar {
+  transition: transform 0.12s ease;
+}
+
+#muzzle-flash {
+  transition: opacity 0.08s ease, transform 0.12s ease;
+  pointer-events: none;
+}
+
+#hit-marker {
+  border-color: rgba(0,255,255,0.0);
+}
+
 .glass {
   background: rgba(20, 20, 40, 0.4);
   backdrop-filter: blur(10px);

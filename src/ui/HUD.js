@@ -12,6 +12,7 @@ export class HUD {
         <div>Score: <span id="score">0</span></div>
         <div>Acc: <span id="acc">0%</span></div>
         <div>Combo: <span id="combo">0</span></div>
+        <div>Sen: <span id="sensi-val">${this.game.settings.sensitivity}</span></div>
         <div>FPS: <span id="fps">60</span></div>
       </div>
     `;
@@ -22,5 +23,6 @@ export class HUD {
     this.element.querySelector('#score').textContent = state.score || 0;
     this.element.querySelector('#acc').textContent = `${state.accuracy?.toFixed(1) || 0}%`;
     this.element.querySelector('#combo').textContent = state.combo || 0;
+    this.element.querySelector('#sensi-val').textContent = this.game.settings.sensitivity.toFixed(2);
   }
 }

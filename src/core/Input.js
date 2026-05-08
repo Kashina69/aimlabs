@@ -4,6 +4,8 @@ export class Input {
     this.mouse = { x: 0, y: 0 };
     this.isLocked = false;
 
+    // ensure canvas is focusable
+    try { this.canvas.tabIndex = this.canvas.tabIndex || -1; } catch(e) {}
     canvas.addEventListener('click', () => {
       if (!this.isLocked) {
         canvas.requestPointerLock();
@@ -12,6 +14,11 @@ export class Input {
 
     document.addEventListener('pointerlockchange', () => {
       this.isLocked = document.pointerLockElement === canvas;
+      if (this.isLocked) {
+        try { canvas.style.cursor = 'none'; } catch(e) {}
+      } else {
+        try { canvas.style.cursor = 'crosshair'; } catch(e) {}
+      }
     });
 
     document.addEventListener('mousemove', (e) => {

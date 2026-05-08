@@ -4,12 +4,14 @@ export class Target {
   constructor() {
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.3, 16, 16),
-      new THREE.MeshBasicMaterial({
+      new THREE.MeshStandardMaterial({
         color: 0x00ffff,
         emissive: 0x00ffff,
         emissiveIntensity: 1.0,
         transparent: true,
-        opacity: 0.9
+        opacity: 0.95,
+        roughness: 0.2,
+        metalness: 0.0
       })
     );
     this.mesh.frustumCulled = false;

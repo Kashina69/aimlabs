@@ -8,6 +8,8 @@ export class Renderer {
     this.canvas.id = 'game-canvas';
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
+    this.canvas.tabIndex = 0; // make focusable for pointer lock
+    this.canvas.style.cursor = 'crosshair';
     container.appendChild(this.canvas);
 
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false });
