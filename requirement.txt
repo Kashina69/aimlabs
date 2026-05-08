@@ -1,0 +1,276 @@
+Create a modern browser-based 3D aim trainer game inspired by Aim Labs using HTML, CSS, JavaScript, Three.js, and any lightweight supporting libraries needed for audio, UI, or optimization. The game must run smoothly on mid-range and low-end PCs directly in the browser without installation. Prioritize responsiveness, low latency, clean architecture, and gameplay feel over ultra-realistic graphics.
+
+Core Tech Stack:
+
+HTML5
+CSS3
+Vanilla JavaScript (avoid heavy frameworks unless truly needed)
+Three.js for 3D rendering
+GSAP for smooth animations (optional)
+Howler.js for audio and sound effects
+Pointer Lock API for FPS mouse control
+WebGL optimization techniques
+LocalStorage for saving settings and stats
+
+Main Goal:
+Build a polished 3D aim trainer similar to Aim Labs/Kovaaks but lightweight and web-based.
+
+Visual Style:
+
+Minimalistic futuristic style
+Clean neon UI
+Dark background with glowing targets
+Lightweight graphics optimized for 60–144 FPS
+Soft lighting only
+No heavy shadows or photorealistic rendering
+Use GPU-efficient materials
+Smooth particle effects only when necessary
+
+Game Features:
+
+FPS Camera System
+First-person perspective
+Mouse movement with Pointer Lock API
+Adjustable sensitivity settings
+Raw mouse feel with low latency
+Smooth camera movement
+Field of View (FOV) slider
+Crosshair customization
+Aim Training Modes
+Implement multiple game modes:
+
+A. Static Clicking
+
+Targets appear in random positions
+Player clicks targets as fast as possible
+Score based on accuracy and speed
+
+B. Grid Shot
+
+Multiple targets on wall/grid
+Fast respawn system
+Combo multiplier
+Accuracy tracking
+
+C. Strafing Targets
+
+Targets move left/right
+Variable speed
+
+D. Tracking Trainer
+
+Continuously moving orb
+Player keeps crosshair on target
+Score based on tracking precision
+
+E. Flick Trainer
+
+Random pop-up targets
+Reaction time measurement
+
+F. Micro Adjustment Training
+
+Very small targets
+Precision-focused
+
+G. Sphere Frenzy
+
+Multiple moving targets simultaneously
+
+H. Speed Switching
+
+Quickly switch between distant targets
+
+I. Reaction Time Test
+
+Target appears after random delay
+Measure milliseconds
+
+J. Vertical Tracking
+
+Flying targets moving vertically
+Difficulty Settings
+Include:
+Easy
+Medium
+Hard
+Insane
+Custom difficulty
+
+Custom settings:
+
+Target size
+Spawn speed
+Movement speed
+Number of targets
+Time limit
+Target health
+Hitbox scale
+Audio System
+Add responsive sound effects:
+Hit marker sounds
+Miss sounds
+UI click sounds
+Combo sounds
+Session complete sound
+Spatial audio where possible
+
+Audio requirements:
+
+Low latency
+Volume sliders
+Mute toggle
+UI/UX
+Create a polished modern UI:
+Main menu
+Settings menu
+Pause menu
+Game mode selection
+Statistics dashboard
+Session summary screen
+FPS counter
+Accuracy display
+Kills per second
+Hit percentage
+Reaction time graph
+
+UI style:
+
+Glassmorphism or neon cyber UI
+Animated transitions
+Responsive design
+Keyboard navigation support
+Performance Optimization
+This is critical.
+
+The game MUST:
+
+Run smoothly on integrated graphics
+Maintain stable FPS
+Use object pooling for targets
+Minimize garbage collection
+Use requestAnimationFrame properly
+Avoid unnecessary re-renders
+Optimize Three.js scene management
+Use instanced meshes when possible
+Lazy load assets
+Compress textures
+
+Provide:
+
+Performance mode toggle
+Graphics quality settings
+Settings System
+Implement fully working settings:
+Mouse sensitivity
+ADS sensitivity multiplier
+FOV
+Crosshair:
+Size
+Color
+Thickness
+Dot toggle
+Graphics quality
+FPS cap
+Audio levels
+Keybinds
+
+Save all settings with LocalStorage.
+
+Statistics & Progress
+Track:
+Accuracy
+Average reaction time
+Targets hit
+Missed shots
+Best scores
+Session history
+Heatmap data if possible
+Improvement over time
+
+Add charts using lightweight chart libraries.
+
+Gameplay Feel
+The shooting should feel satisfying:
+Instant hit registration
+Responsive targets
+Smooth animations
+Small hit effects
+Screen shake option
+Hit flash effects
+Combo streaks
+Advanced Features
+If possible include:
+Bot movement prediction
+Dynamic difficulty scaling
+Aim smoothing analysis
+Practice playlists
+Training routines
+Daily challenge mode
+File Structure
+Generate a clean production-ready structure:
+
+/src
+/core
+/modes
+/ui
+/audio
+/utils
+/assets
+main.js
+index.html
+style.css
+
+Code Requirements:
+
+Modular architecture
+Clean reusable classes
+Well-commented code
+Avoid spaghetti code
+Use ES6 modules
+Separate game logic from rendering logic
+Easy to extend with new game modes
+Graphics Requirements
+Keep graphics lightweight:
+Low poly
+Simple emissive materials
+Minimal post-processing
+Lightweight particles
+No ray tracing
+No expensive reflections
+Controls
+Default controls:
+Mouse = Aim
+Left Click = Shoot
+ESC = Pause
+WASD optional movement
+R = Restart
+TAB = Stats
+Extra Polish
+Add:
+Smooth menu transitions
+Hover effects
+Animated backgrounds
+Responsive HUD
+Dynamic score popups
+Combo streak visuals
+Final Deliverable
+Generate:
+Complete working code
+Fully playable browser game
+Organized files
+Placeholder assets if needed
+README with setup instructions
+No missing dependencies
+Everything should run locally by opening index.html or with a simple local server
+
+Important Constraints:
+
+Prioritize smooth gameplay over visual realism
+Avoid bloated frameworks
+Keep memory usage low
+Make the aiming feel extremely responsive
+Do not generate fake placeholder logic — all systems must function
+Ensure code is scalable for future multiplayer support
+
+The final result should feel like a lightweight browser-based Aim Labs clone with multiple training routines, polished UX, smooth FPS gameplay, configurable settings, satisfying shooting mechanics, and strong optimization.
