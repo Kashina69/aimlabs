@@ -91,6 +91,7 @@ export class Game {
       volume: Storage.get('settings.volume', 0.7),
       graphics: Storage.get('settings.graphics', 'medium'),
       targetSize: Storage.get('settings.targetSize', 0.3),
+      invertY: Storage.get('settings.invertY', false),
     };
   }
 
@@ -244,7 +245,8 @@ export class Game {
     if (this.isRunning && this.input.isLocked) {
       // Rotate camera
       const dx = this.input.mouse.x * this.settings.sensitivity * 0.002;
-      const dy = this.input.mouse.y * this.settings.sensitivity * 0.002;
+      const invertMul = this.settings.invertY ? 1 : -1;
+      const dy = this.input.mouse.y * this.settings.sensitivity * 0.002 * invertMul;
       this.camera.instance.rotation.y -= dx;
       this.camera.instance.rotation.x -= dy;
       this.camera.instance.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.camera.instance.rotation.x));
