@@ -18,8 +18,8 @@ export class FlickMode {
   spawn() {
     const pos = new THREE.Vector3(
       THREE.MathUtils.randFloatSpread(10),
-      THREE.MathUtils.randFloat(0, 4),
-      THREE.MathUtils.randFloat(5, 20)
+      THREE.MathUtils.randFloat(0.7, 4.2),
+      THREE.MathUtils.randFloat(5, 13)
     );
     const size = this.game.settings.targetSize || 0.2;
     const t = this.game.pool.acquire(pos, size, 1);

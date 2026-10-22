@@ -75,8 +75,8 @@ export class StatsUI {
   }
 
   close() {
-    if (this.game?.overlay) {
-      this.game.overlay.close();
+    if (this.game?.closeOverlayToMenu) {
+      this.game.closeOverlayToMenu();
       return;
     }
     try { this.el.remove(); } catch(e) {}

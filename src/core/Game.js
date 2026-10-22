@@ -5,6 +5,7 @@ import { Renderer } from './Renderer.js';
 import { GameScene } from './Scene.js';
 import { Pool } from './Pool.js';
 import { Target } from './Target.js';
+import { Weapon } from './Weapon.js';
 import { AudioManager } from '../audio/AudioManager.js';
 import { Storage } from '../utils/Storage.js';
 import { Menu } from '../ui/Menu.js';
@@ -13,7 +14,13 @@ import { Settings } from '../ui/Settings.js';
 import { StatsUI } from '../ui/Stats.js';
 import { StatsManager } from '../utils/StatsManager.js';
 import { OverlayManager } from '../ui/OverlayManager.js';
+import { buildCrosshairSVG, mergeCrosshairConfig } from '../ui/Crosshair.js';
 import { loadSelectableModes } from './ModeRegistry.js';
+
+/* Marvel Rivals (UE5) yaw constant: degrees turned per mouse count per
+   sensitivity point. Using it 1:1 lets you paste the exact MR sens value
+   and get the identical turn speed (browser movementX px ≈ mouse counts). */
+const MARVEL_RIVALS_YAW_DEG = 0.0176;
 
 export class Game {
   constructor() {
@@ -33,6 +40,11 @@ export class Game {
         this.scene.scene.remove(target.mesh);
       }
     );
+
+    /* Weapon lives on the camera, and the camera must be in the scene for it to render */
+    this.scene.scene.add(this.camera.instance);
+    this.weapon = new Weapon(this.camera.instance);
+    this.lastFrameTime = 0;
 
     this.settings = this.loadSettings();
     this.currentMode = null;
@@ -68,23 +80,6 @@ export class Game {
   }
 
   createWeaponFeedbackUI() {
-    this.gunEl = document.createElement('div');
-    this.gunEl.id = 'gun-hud';
-    this.gunEl.style.cssText = 'position:absolute; left:50%; bottom:6%; transform:translateX(-50%); width:140px; height:60px; pointer-events:none; z-index:9998;';
-    this.gunEl.innerHTML = '<div id="gun-bar" style="width:100px;height:24px;background:linear-gradient(#222,#111);margin:0 auto;border-radius:6px;box-shadow:0 0 10px rgba(0,255,255,0.08);"></div>';
-    this.persistentLayer.appendChild(this.gunEl);
-
-    this.gunSprite = document.createElement('div');
-    this.gunSprite.id = 'gun-sprite';
-    this.gunSprite.style.cssText = 'position:absolute; left:50%; bottom:4%; transform:translateX(-50%); width:220px; height:120px; pointer-events:none; z-index:9997;';
-    this.gunSprite.innerHTML = '<div class="gun-body"></div>';
-    this.persistentLayer.appendChild(this.gunSprite);
-
-    this.muzzle = document.createElement('div');
-    this.muzzle.id = 'muzzle-flash';
-    this.muzzle.style.cssText = 'position:absolute; left:50%; bottom:18%; transform:translateX(-50%); width:60px; height:60px; border-radius:50%; background:radial-gradient(circle, rgba(255,255,200,0.9) 0%, rgba(255,200,0,0.6) 40%, transparent 60%); mix-blend-mode:screen; opacity:0; pointer-events:none; z-index:9999;';
-    this.persistentLayer.appendChild(this.muzzle);
-
     this.hitMarker = document.createElement('div');
     this.hitMarker.id = 'hit-marker';
     this.hitMarker.style.cssText = 'position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:140px; height:140px; border-radius:50%; border:2px solid rgba(0,255,255,0.0); pointer-events:none; transition:all 0.12s ease; z-index:10000;';
@@ -96,7 +91,7 @@ export class Game {
       sensitivity: Storage.get('settings.sensitivity', 2.5),
       fov: Storage.get('settings.fov', 90),
       crosshair: Storage.get('settings.crosshair', { size: 6, color: '#0ff', thickness: 1, dot: false }),
-      volume: Storage.get('settings.volume', 0.7),
+      volume: Storage.get('audio.volume', 0.7),
       graphics: Storage.get('settings.graphics', 'medium'),
       targetSize: Storage.get('settings.targetSize', 0.3),
       spawnSpeed: Storage.get('settings.spawnSpeed', 1),
@@ -108,6 +103,7 @@ export class Game {
   init() {
     this.bindEvents();
     this.hud = new HUD(this.persistentLayer, this);
+    this.setInGameUI(false);
     this.showMainMenu(false);
     this.applySettings();
     this.animate(0);
@@ -125,19 +121,42 @@ export class Game {
       if (document.hidden && this.isRunning) this.pause();
     });
 
+    /* Losing pointer lock mid-session (Esc key is often swallowed by the browser)
+       must pause instead of leaving a frozen "running but unlocked" state */
+    document.addEventListener('pointerlockchange', () => {
+      if (!document.pointerLockElement && this.isRunning) this.pause();
+    });
+
     this.renderer.canvas.addEventListener('mousedown', () => {
       if (!this.isRunning || !this.input.isLocked) return;
       this.shootAtCrosshair();
     });
   }
 
+  /* Escape is the single "get me somewhere sane" key:
+     - pause menu open + session exists -> resume (Escape toggles pause, like any FPS)
+     - other modal open  -> close it and land somewhere usable (menu when paused)
+     - running           -> pause (shows main menu)
+     - idle              -> open settings so Escape always does something useful */
   handleGlobalKeydown(event) {
     if (event.code === 'Escape') {
+      if (this.input.isLocked && !this.isRunning) {
+        this.input.unlock();
+      }
       if (this.overlay.activeOverlay) {
+        if (this.overlay.activeOverlay.id === 'main-menu' && this.currentMode) {
+          this.resume();
+          return;
+        }
         this.overlay.close();
+        if (!this.isRunning) this.showMainMenu(!!this.currentMode);
         return;
       }
-      if (this.isRunning) this.pause();
+      if (this.isRunning) {
+        this.pause();
+        return;
+      }
+      this.showSettings();
       return;
     }
 
@@ -158,23 +177,19 @@ export class Game {
 
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera({ x: 0, y: 0 }, this.camera.instance);
-    const visibleMeshes = this.pool.objects.map((target) => target.mesh).filter((mesh) => mesh.visible);
+    /* Raycast live targets (pool.active), NOT pool.objects — that array is the
+       free stack, so active targets are not in it and shots land on nothing. */
+    const visibleMeshes = Array.from(this.pool.active)
+      .map((target) => target.mesh)
+      .filter((mesh) => mesh.visible && mesh.userData.target);
     const intersects = raycaster.intersectObjects(visibleMeshes);
     const hit = intersects.length > 0;
-    this.currentMode.onClick(hit ? intersects : []);
+    this.currentMode.onClick(intersects);
     this.triggerHitFeedback(hit);
   }
 
   playShotAnimation() {
-    this.muzzle.style.opacity = '1';
-    this.muzzle.style.transform = 'translateX(-50%) scale(1.1)';
-    this.gunEl.querySelector('#gun-bar').style.transform = 'translateY(-6px) scaleX(0.98)';
-
-    this.queueUITimer(() => {
-      this.muzzle.style.opacity = '0';
-      this.muzzle.style.transform = 'translateX(-50%) scale(0.8)';
-      this.gunEl.querySelector('#gun-bar').style.transform = '';
-    }, 100);
+    this.weapon.shoot();
   }
 
   triggerHitFeedback(hit) {
@@ -198,13 +213,20 @@ export class Game {
     this.uiTimers = [];
   }
 
+  /* Toggles the in-game-only UI (crosshair + HUD) together so menus stay clean */
+  setInGameUI(visible) {
+    this.crosshair.style.display = visible ? 'block' : 'none';
+    const display = visible ? 'block' : 'none';
+    if (this.hud) this.hud.element.style.display = display;
+  }
+
   showMainMenu(showResume) {
     const menu = new Menu(document.createElement('div'), this, { showResume });
     this.overlay.show(menu.element);
   }
 
   endCurrentModeAndSaveSession() {
-    if (!this.currentMode) return;
+    if (!this.currentMode) return null;
     try {
       const summary = this.currentMode.end?.();
       if (summary) {
@@ -215,9 +237,65 @@ export class Game {
           ...summary
         });
       }
+      return summary;
     } catch (error) {
       console.warn('Mode end failed', error);
+      return null;
     }
+  }
+
+  /* Called when a mode signals `finished` (session timer expired).
+     Saves stats, tears the session down and shows the results modal. */
+  endSession() {
+    if (!this.currentMode) return;
+    const ModeClass = this.currentMode.constructor;
+    const modeName = this.currentModeName || ModeClass.name;
+    const summary = { name: modeName, ...this.endCurrentModeAndSaveSession() };
+
+    this.isRunning = false;
+    this.input.lockEnabled = false;
+    this.input.unlock();
+    this.setInGameUI(false);
+    this.clearActiveTargets();
+    this.clearUITimers();
+    this.audio.play('complete');
+    this.showSummary(summary, ModeClass, modeName);
+  }
+
+  /* Results screen shown after every completed session */
+  showSummary(summary, ModeClass, modeName) {
+    const modal = document.createElement('div');
+    modal.className = 'glass';
+    modal.style.cssText = 'position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:24px; min-width:320px; text-align:center;';
+    modal.innerHTML = `
+      <h3 class="neon-text">${summary.name} Complete</h3>
+      <div style="text-align:left; margin: 12px 0; line-height:1.7;">
+        <div>Score: <strong>${Math.round(summary.score || 0)}</strong></div>
+        <div>Accuracy: <strong>${(summary.accuracy || 0).toFixed(1)}%</strong> (${summary.hits || 0}/${summary.shots || 0})</div>
+        ${summary.maxCombo !== undefined ? `<div>Best combo: <strong>${summary.maxCombo}</strong></div>` : ''}
+        ${summary.avgReaction !== undefined ? `<div>Avg reaction: <strong>${summary.avgReaction}ms</strong> (best ${summary.bestReaction || '-'}ms)</div>` : ''}
+      </div>
+    `;
+
+    const retry = document.createElement('button');
+    retry.className = 'btn';
+    retry.textContent = 'Retry';
+    retry.onclick = () => {
+      this.audio.play('click');
+      this.startMode(ModeClass, modeName);
+    };
+    const menu = document.createElement('button');
+    menu.className = 'btn';
+    menu.textContent = 'Main Menu';
+    menu.onclick = () => {
+      this.audio.play('click');
+      this.overlay.close();
+      this.showMainMenu(false);
+    };
+    modal.appendChild(retry);
+    modal.appendChild(menu);
+
+    this.overlay.show(modal);
   }
 
   clearActiveTargets() {
@@ -237,10 +315,15 @@ export class Game {
     this.currentMode.start();
     this.sessionStart = Date.now();
     this.isRunning = true;
-    this.crosshair.style.display = 'block';
+    this.setInGameUI(true);
+
+    /* Fresh session starts with the view centered on the target wall */
+    this.camera.reset();
+    this.input.lockEnabled = true;
 
     try {
-      this.renderer.canvas.requestPointerLock();
+      const request = this.renderer.canvas.requestPointerLock();
+      if (request?.catch) request.catch(() => {});
     } catch (error) {
       // no-op
     }
@@ -302,8 +385,9 @@ export class Game {
 
   pause() {
     this.isRunning = false;
+    this.input.lockEnabled = false;
     this.input.unlock();
-    this.crosshair.style.display = 'none';
+    this.setInGameUI(false);
     this.showMainMenu(true);
   }
 
@@ -311,9 +395,11 @@ export class Game {
     if (!this.currentMode) return;
     this.overlay.close();
     this.isRunning = true;
-    this.crosshair.style.display = 'block';
+    this.input.lockEnabled = true;
+    this.setInGameUI(true);
     try {
-      this.renderer.canvas.requestPointerLock();
+      const request = this.renderer.canvas.requestPointerLock();
+      if (request?.catch) request.catch(() => {});
     } catch (error) {
       // no-op
     }
@@ -328,12 +414,25 @@ export class Game {
 
   animate(time) {
     requestAnimationFrame((nextTime) => this.animate(nextTime));
+
+    /* Weapon recoil/sway runs every frame, even when the game is paused */
+    const dt = Math.min(0.05, (time - this.lastFrameTime) / 1000 || 0);
+    this.lastFrameTime = time;
+    this.weapon.update(dt);
+
     this.updateFPSCounter(time);
 
     if (this.isRunning && this.input.isLocked && this.currentMode) {
       this.updateCameraFromMouse();
-      this.currentMode.update();
-      this.updateHUD();
+      const deltaMs = Math.min(50, dt * 1000);
+      this.currentMode.update(deltaMs);
+
+      /* A mode can declare the session over (e.g. time ran out) */
+      if (this.currentMode.finished) {
+        this.endSession();
+      } else {
+        this.updateHUD();
+      }
     }
 
     this.renderer.render(this.scene.scene, this.camera.instance);
@@ -347,13 +446,20 @@ export class Game {
     this.lastTime = time;
   }
 
+  /* Applies accumulated mouse deltas with clamped look angles:
+     180 degrees horizontal facing the target wall, ~164 degrees vertical.
+     Sensitivity follows the Marvel Rivals scale (0.0176 deg per count),
+     so numbers from Marvel Rivals transfer 1:1. invertY only flips pitch. */
   updateCameraFromMouse() {
-    const sensitivityMultiplier = this.settings.sensitivity * 0.002;
-    const dx = this.input.mouse.x * sensitivityMultiplier;
-    const dy = this.input.mouse.y * sensitivityMultiplier * (this.settings.invertY ? 1 : -1);
+    const radiansPerPx = this.settings.sensitivity * MARVEL_RIVALS_YAW_DEG * (Math.PI / 180);
+    const dx = this.input.mouse.x * radiansPerPx;
+    const dy = this.input.mouse.y * radiansPerPx * (this.settings.invertY ? -1 : 1);
+
     this.camera.instance.rotation.y -= dx;
     this.camera.instance.rotation.x -= dy;
-    this.camera.instance.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.camera.instance.rotation.x));
+    this.camera.clampRotation();
+
+    this.weapon.sway(dx, dy);
     this.input.mouse.x = 0;
     this.input.mouse.y = 0;
   }
@@ -364,20 +470,27 @@ export class Game {
     this.hud.update({
       score: this.currentMode.score || 0,
       accuracy: shots > 0 ? (hits / shots) * 100 : 0,
-      combo: this.currentMode.combo || 0
+      combo: this.currentMode.combo || 0,
+      timeLeft: this.currentMode.timeLeft
     });
     this.hud.setFPS(this.fps);
   }
 
   applySettings() {
     this.camera.updateFOV(this.settings.fov);
-    const crosshair = this.settings.crosshair;
-    this.crosshair.style.width = `${crosshair.dot ? 2 : crosshair.size}px`;
-    this.crosshair.style.height = `${crosshair.dot ? 2 : crosshair.size}px`;
-    this.crosshair.style.border = crosshair.dot ? 'none' : `${crosshair.thickness}px solid ${crosshair.color}`;
-    this.crosshair.style.backgroundColor = crosshair.dot ? crosshair.color : 'transparent';
-    this.crosshair.classList.toggle('dot', crosshair.dot);
+    this.applyCrosshair();
     this.audio.setVolume(this.settings.volume);
+  }
+
+  /* Renders the configured crosshair into the DOM overlay element */
+  applyCrosshair() {
+    this.crosshair.innerHTML = buildCrosshairSVG(mergeCrosshairConfig(this.settings.crosshair));
+  }
+
+  /* Any modal close while idle must land back on the main menu, never an empty screen */
+  closeOverlayToMenu() {
+    this.overlay.close();
+    this.showMainMenu(!!this.currentMode);
   }
 
   showSettings() {

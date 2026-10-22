@@ -12,6 +12,7 @@ export class HUD {
         <div>Score: <span id="score">0</span></div>
         <div>Acc: <span id="acc">0%</span></div>
         <div>Combo: <span id="combo">0</span></div>
+        <div id="time-row" class="hidden">Time: <span id="time">0</span></div>
         <div>Sen: <span id="sensi-val">${this.game.settings.sensitivity}</span></div>
         <div>FPS: <span id="fps">60</span></div>
       </div>
@@ -24,6 +25,14 @@ export class HUD {
     this.element.querySelector('#acc').textContent = `${state.accuracy?.toFixed(1) || 0}%`;
     this.element.querySelector('#combo').textContent = state.combo || 0;
     this.element.querySelector('#sensi-val').textContent = this.game.settings.sensitivity.toFixed(2);
+    /* Modes with a session clock surface the remaining time */
+    const timeRow = this.element.querySelector('#time-row');
+    if (state.timeLeft === undefined || state.timeLeft === null) {
+      timeRow.classList.add('hidden');
+    } else {
+      timeRow.classList.remove('hidden');
+      this.element.querySelector('#time').textContent = `${state.timeLeft.toFixed(1)}s`;
+    }
   }
 
   setFPS(fps) {
