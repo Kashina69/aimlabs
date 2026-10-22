@@ -1,5 +1,6 @@
 import { Storage } from '../utils/Storage.js';
 import { buildCrosshairSVG, mergeCrosshairConfig } from './Crosshair.js';
+import { GAME_PROFILES, getProfileOrDefault, convertSensitivity, clampToProfile } from './GameProfiles.js';
 
 export class Settings {
   constructor(container, game) {
@@ -23,6 +24,10 @@ export class Settings {
   build() {
     const s = this.game.settings;
     const ch = mergeCrosshairConfig(s.crosshair);
+    const profile = getProfileOrDefault(s.game);
+    const gameOptions = GAME_PROFILES.map(
+      (game) => `<option value="${game.id}">${game.name}</option>`
+    ).join('');
 
     this.el.innerHTML = `
       <h3 class="neon-text">Settings</h3>
@@ -31,9 +36,16 @@ export class Settings {
           <input id="fov" type="range" min="60" max="120" step="0.1" value="${s.fov}">
           <input id="fov-num" type="number" step="0.1" value="${s.fov}" style="width:72px; margin-left:8px">
         </div>
-        <div>Sensitivity <span style="opacity:.7">(Marvel Rivals value)</span>:
-          <input id="sensi" type="range" min="0.01" max="12" step="0.01" value="${s.sensitivity}">
-          <input id="sensi-num" type="number" step="0.01" value="${s.sensitivity}" style="width:72px; margin-left:8px">
+        <div>Game:
+          <select id="sens-game" style="margin-left:8px">${gameOptions}</select>
+        </div>
+        <div>Sensitivity <span id="sens-game-label" style="opacity:.7">(${profile.short} value)</span>:
+          <input id="sensi" type="range" min="${profile.min}" max="${profile.max}" step="0.01" value="${s.sensitivity}">
+          <input id="sensi-num" type="number" step="0.01" value="${s.sensitivity}" style="width:96px; margin-left:8px">
+        </div>
+        <div style="font-size:12px; opacity:.85; max-width:420px;">
+          Select your game, then paste your in-game sensitivity for a 1:1 feel (same mouse DPI).
+          Changing the game converts the value so the turn speed stays identical.
         </div>
         <div><label><input id="invertY" type="checkbox" ${s.invertY ? 'checked' : ''}/> Invert Y</label></div>
       </div>
@@ -81,9 +93,46 @@ export class Settings {
     this.el.querySelector('#invertY').addEventListener('change', (e) => this.commit('invertY', e.target.checked, 'settings.invertY'));
 
     this.bindSlider('fov', 'fov-num', (v) => this.commit('fov', v, 'settings.fov'));
-    this.bindSlider('sensi', 'sensi-num', (v) => this.commit('sensitivity', v, 'settings.sensitivity'));
+    this.bindSlider('sensi', 'sensi-num', (v) => this.setSensitivity(v));
+
+    const gameSelect = this.el.querySelector('#sens-game');
+    gameSelect.value = profile.id;
+    gameSelect.addEventListener('change', () => this.changeGame(gameSelect.value));
 
     this.buildCrosshairControls(ch);
+  }
+
+  /* Persists a sensitivity value in the active game's scale and refreshes the controls */
+  setSensitivity(value) {
+    const profile = getProfileOrDefault(this.game.settings.game);
+    /* 4 decimals is far below any perceptible turn-speed difference but keeps
+       converted values readable instead of 6.666666666666667 */
+    const rounded = Math.round(clampToProfile(value, profile) * 10000) / 10000;
+    this.game.settings.sensitivity = rounded;
+    Storage.set('settings.sensitivity', rounded);
+    const slider = this.el.querySelector('#sensi');
+    const number = this.el.querySelector('#sensi-num');
+    if (slider) slider.value = this.game.settings.sensitivity;
+    if (number) number.value = this.game.settings.sensitivity;
+  }
+
+  /* Switching the game converts the current sensitivity so the physical turn
+     speed (deg per count) is identical in the newly selected game */
+  changeGame(gameId) {
+    const from = getProfileOrDefault(this.game.settings.game);
+    const to = getProfileOrDefault(gameId);
+    const converted = convertSensitivity(this.game.settings.sensitivity, from, to);
+
+    this.game.settings.game = to.id;
+    Storage.set('settings.game', to.id);
+
+    const slider = this.el.querySelector('#sensi');
+    if (slider) {
+      slider.min = to.min;
+      slider.max = to.max;
+    }
+    this.el.querySelector('#sens-game-label').textContent = `(${to.short} value)`;
+    this.setSensitivity(converted);
   }
 
   /* Wires every crosshair control; any change re-renders preview + in-game crosshair */

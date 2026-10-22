@@ -95,8 +95,11 @@ export class ReactionMode {
     (this._timers || []).forEach(id => clearTimeout(id));
     this._timers = [];
     this.clearTarget();
-    const avg = this.reactionTimes.length
-      ? this.reactionTimes.reduce((a, b) => a + b, 0) / this.reactionTimes.length
+    const times = this.reactionTimes;
+    const avg = times.length ? times.reduce((a, b) => a + b, 0) / times.length : 0;
+    /* Spread of reactions = consistency signal for the aim report */
+    const sd = times.length > 1
+      ? Math.sqrt(times.reduce((acc, v) => acc + (v - avg) ** 2, 0) / times.length)
       : 0;
     return {
       score: this.score,
@@ -105,7 +108,9 @@ export class ReactionMode {
       shots: this.shots,
       maxCombo: this.maxCombo,
       avgReaction: Math.round(avg),
-      bestReaction: this.reactionTimes.length ? Math.round(Math.min(...this.reactionTimes)) : 0
+      bestReaction: times.length ? Math.round(Math.min(...times)) : 0,
+      reactionSpread: Math.round(sd),
+      reactionCount: times.length
     };
   }
 }

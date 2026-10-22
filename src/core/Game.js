@@ -12,15 +12,17 @@ import { Menu } from '../ui/Menu.js';
 import { HUD } from '../ui/HUD.js';
 import { Settings } from '../ui/Settings.js';
 import { StatsUI } from '../ui/Stats.js';
+import { AimReport } from '../ui/AimReport.js';
 import { StatsManager } from '../utils/StatsManager.js';
 import { OverlayManager } from '../ui/OverlayManager.js';
 import { buildCrosshairSVG, mergeCrosshairConfig } from '../ui/Crosshair.js';
+import {
+  getProfileOrDefault,
+  convertSensitivity,
+  clampToProfile,
+  LEGACY_YAW
+} from '../ui/GameProfiles.js';
 import { loadSelectableModes } from './ModeRegistry.js';
-
-/* Marvel Rivals (UE5) yaw constant: degrees turned per mouse count per
-   sensitivity point. Using it 1:1 lets you paste the exact MR sens value
-   and get the identical turn speed (browser movementX px ≈ mouse counts). */
-const MARVEL_RIVALS_YAW_DEG = 0.0176;
 
 export class Game {
   constructor() {
@@ -84,11 +86,49 @@ export class Game {
     this.hitMarker.id = 'hit-marker';
     this.hitMarker.style.cssText = 'position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:140px; height:140px; border-radius:50%; border:2px solid rgba(0,255,255,0.0); pointer-events:none; transition:all 0.12s ease; z-index:10000;';
     this.persistentLayer.appendChild(this.hitMarker);
+
+    /* Persistent fullscreen toggle in the top-right corner (usable in menus
+       and mid-session free-cursor mode; pointer lock routes clicks to the canvas) */
+    this.fullscreenBtn = document.createElement('div');
+    this.fullscreenBtn.id = 'fullscreen-btn';
+    this.fullscreenBtn.className = 'glass fullscreen-btn';
+    this.fullscreenBtn.style.cssText = 'position:absolute; top:10px; right:10px; padding:6px 12px; font-size:12px; color:#0ff; cursor:pointer; pointer-events:auto; z-index:10001; user-select:none;';
+    this.fullscreenBtn.textContent = '⛶ Fullscreen';
+    this.fullscreenBtn.addEventListener('click', () => {
+      this.audio.play('click');
+      this.toggleFullscreen();
+    });
+    this.persistentLayer.appendChild(this.fullscreenBtn);
+
+    this.freeCursorHint = document.createElement('div');
+    this.freeCursorHint.id = 'free-cursor-hint';
+    this.freeCursorHint.style.cssText = 'position:absolute; left:50%; top:12%; transform:translateX(-50%); padding:8px 14px; display:none; font-size:13px; z-index:9999;';
+    this.freeCursorHint.className = 'glass';
+    this.freeCursorHint.textContent = 'Free cursor — aiming paused. Click the screen or middle-click again to resume.';
+    this.persistentLayer.appendChild(this.freeCursorHint);
   }
 
   loadSettings() {
+    const storedSens = Storage.get('settings.sensitivity', 2.5);
+    const storedGame = Storage.get('settings.game', null);
+    let profile = storedGame ? getProfileOrDefault(storedGame) : null;
+    let sensitivity = storedSens;
+
+    /* Saves made before game profiles existed were calibrated against the old
+       0.0176 constant; convert them into the default profile's scale so the
+       tuned feel is preserved after the yaw table was corrected. */
+    if (!profile) {
+      profile = getProfileOrDefault(null);
+      sensitivity = convertSensitivity(storedSens, { yaw: LEGACY_YAW }, profile);
+      /* Rounded the same way the settings UI stores converted values */
+      sensitivity = Math.round(sensitivity * 10000) / 10000;
+      Storage.set('settings.game', profile.id);
+      Storage.set('settings.sensitivity', sensitivity);
+    }
+
     return {
-      sensitivity: Storage.get('settings.sensitivity', 2.5),
+      game: profile.id,
+      sensitivity,
       fov: Storage.get('settings.fov', 90),
       crosshair: Storage.get('settings.crosshair', { size: 6, color: '#0ff', thickness: 1, dot: false }),
       volume: Storage.get('audio.volume', 0.7),
@@ -98,6 +138,11 @@ export class Game {
       movementSpeed: Storage.get('settings.movementSpeed', 1),
       invertY: Storage.get('settings.invertY', false)
     };
+  }
+
+  /* The sensitivity is expressed in the selected game's own scale */
+  activeProfile() {
+    return getProfileOrDefault(this.settings.game);
   }
 
   init() {
@@ -117,20 +162,37 @@ export class Game {
     });
 
     document.addEventListener('keydown', (event) => this.handleGlobalKeydown(event));
+    document.addEventListener('fullscreenchange', () => this.syncFullscreenLabel());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.isRunning) this.pause();
     });
 
     /* Losing pointer lock mid-session (Esc key is often swallowed by the browser)
-       must pause instead of leaving a frozen "running but unlocked" state */
+       must pause instead of leaving a frozen "running but unlocked" state.
+       Exception: free-cursor mode, which deliberately releases the lock. */
     document.addEventListener('pointerlockchange', () => {
-      if (!document.pointerLockElement && this.isRunning) this.pause();
+      if (!document.pointerLockElement && this.isRunning && !this.input.freeCursor) this.pause();
     });
 
-    this.renderer.canvas.addEventListener('mousedown', () => {
-      if (!this.isRunning || !this.input.isLocked) return;
-      this.shootAtCrosshair();
+    /* Left click fires while locked; middle click toggles free-cursor mode;
+       any click on the canvas in free-cursor mode returns to aiming. */
+    this.renderer.canvas.addEventListener('mousedown', (event) => {
+      if (!this.isRunning) return;
+      if (event.button === 1) {
+        event.preventDefault();
+        this.toggleFreeCursor();
+        return;
+      }
+      if (this.input.isLocked) {
+        this.shootAtCrosshair();
+        return;
+      }
+      if (this.input.freeCursor) {
+        event.preventDefault();
+        this.toggleFreeCursor();
+      }
     });
+    this.renderer.canvas.addEventListener('auxclick', (event) => event.preventDefault());
   }
 
   /* Escape is the single "get me somewhere sane" key:
@@ -166,7 +228,8 @@ export class Game {
   }
 
   adjustSensitivityBy(delta) {
-    this.settings.sensitivity = Math.max(0.01, Math.min(12, this.settings.sensitivity + delta));
+    const profile = this.activeProfile();
+    this.settings.sensitivity = clampToProfile(this.settings.sensitivity + delta, profile);
     Storage.set('settings.sensitivity', this.settings.sensitivity);
   }
 
@@ -220,6 +283,60 @@ export class Game {
     if (this.hud) this.hud.element.style.display = display;
   }
 
+  /* Middle click while playing: release the pointer to the normal cursor so the
+     user can interact with anything outside the game; gameplay (timers, targets,
+     camera) freezes because updates require a locked pointer. Clicking the
+     screen or middle-clicking again re-locks and resumes aiming. */
+  toggleFreeCursor() {
+    const canvas = this.renderer.canvas;
+    if (!this.input.freeCursor && this.input.isLocked) {
+      this.input.freeCursor = true;
+      this.input.unlock();
+      canvas.style.cursor = 'default';
+      this.crosshair.style.display = 'none';
+      this.freeCursorHint.style.display = 'block';
+    } else if (this.input.freeCursor) {
+      this.input.freeCursor = false;
+      this.freeCursorHint.style.display = 'none';
+      canvas.style.cursor = 'none';
+      this.crosshair.style.display = 'block';
+      this.requestPointerLock();
+    }
+  }
+
+  requestPointerLock() {
+    try {
+      const request = this.renderer.canvas.requestPointerLock();
+      if (request?.catch) request.catch(() => {
+        /* Chrome can refuse re-entry for a moment after unlock; clicking the
+           canvas again retries via Input's click handler */
+        this.renderer.canvas.style.cursor = 'crosshair';
+      });
+    } catch (error) {
+      // no-op
+    }
+  }
+
+  toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) {
+        const exit = document.exitFullscreen();
+        if (exit?.catch) exit.catch(() => {});
+      } else {
+        /* Rejection happens when the environment blocks fullscreen (or no user
+           activation); the label then stays truthful via fullscreenchange sync */
+        const request = document.documentElement.requestFullscreen();
+        if (request?.catch) request.catch(() => {});
+      }
+    } catch (error) {
+      // no-op
+    }
+  }
+
+  syncFullscreenLabel() {
+    this.fullscreenBtn.textContent = document.fullscreenElement ? '⛶ Exit Fullscreen' : '⛶ Fullscreen';
+  }
+
   showMainMenu(showResume) {
     const menu = new Menu(document.createElement('div'), this, { showResume });
     this.overlay.show(menu.element);
@@ -253,6 +370,8 @@ export class Game {
     const summary = { name: modeName, ...this.endCurrentModeAndSaveSession() };
 
     this.isRunning = false;
+    this.input.freeCursor = false;
+    this.freeCursorHint.style.display = 'none';
     this.input.lockEnabled = false;
     this.input.unlock();
     this.setInGameUI(false);
@@ -273,6 +392,7 @@ export class Game {
         <div>Score: <strong>${Math.round(summary.score || 0)}</strong></div>
         <div>Accuracy: <strong>${(summary.accuracy || 0).toFixed(1)}%</strong> (${summary.hits || 0}/${summary.shots || 0})</div>
         ${summary.maxCombo !== undefined ? `<div>Best combo: <strong>${summary.maxCombo}</strong></div>` : ''}
+        ${summary.bestStreak !== undefined ? `<div>Longest hold: <strong>${summary.bestStreak.toFixed(1)}s</strong></div>` : ''}
         ${summary.avgReaction !== undefined ? `<div>Avg reaction: <strong>${summary.avgReaction}ms</strong> (best ${summary.bestReaction || '-'}ms)</div>` : ''}
       </div>
     `;
@@ -320,13 +440,9 @@ export class Game {
     /* Fresh session starts with the view centered on the target wall */
     this.camera.reset();
     this.input.lockEnabled = true;
-
-    try {
-      const request = this.renderer.canvas.requestPointerLock();
-      if (request?.catch) request.catch(() => {});
-    } catch (error) {
-      // no-op
-    }
+    this.input.freeCursor = false;
+    this.freeCursorHint.style.display = 'none';
+    this.requestPointerLock();
   }
 
   async showModeSelect() {
@@ -385,6 +501,8 @@ export class Game {
 
   pause() {
     this.isRunning = false;
+    this.input.freeCursor = false;
+    this.freeCursorHint.style.display = 'none';
     this.input.lockEnabled = false;
     this.input.unlock();
     this.setInGameUI(false);
@@ -396,13 +514,9 @@ export class Game {
     this.overlay.close();
     this.isRunning = true;
     this.input.lockEnabled = true;
+    this.input.freeCursor = false;
     this.setInGameUI(true);
-    try {
-      const request = this.renderer.canvas.requestPointerLock();
-      if (request?.catch) request.catch(() => {});
-    } catch (error) {
-      // no-op
-    }
+    this.requestPointerLock();
   }
 
   restart() {
@@ -448,10 +562,12 @@ export class Game {
 
   /* Applies accumulated mouse deltas with clamped look angles:
      180 degrees horizontal facing the target wall, ~164 degrees vertical.
-     Sensitivity follows the Marvel Rivals scale (0.0176 deg per count),
-     so numbers from Marvel Rivals transfer 1:1. invertY only flips pitch. */
+     Turn speed comes from the selected game profile's yaw constant
+     (degrees per count at sens 1), so pasting that game's in-game value
+     gives a 1:1 feel. invertY only flips pitch. */
   updateCameraFromMouse() {
-    const radiansPerPx = this.settings.sensitivity * MARVEL_RIVALS_YAW_DEG * (Math.PI / 180);
+    const degPerCount = this.settings.sensitivity * this.activeProfile().yaw;
+    const radiansPerPx = degPerCount * (Math.PI / 180);
     const dx = this.input.mouse.x * radiansPerPx;
     const dy = this.input.mouse.y * radiansPerPx * (this.settings.invertY ? -1 : 1);
 
@@ -471,7 +587,8 @@ export class Game {
       score: this.currentMode.score || 0,
       accuracy: shots > 0 ? (hits / shots) * 100 : 0,
       combo: this.currentMode.combo || 0,
-      timeLeft: this.currentMode.timeLeft
+      timeLeft: this.currentMode.timeLeft,
+      track: this.currentMode.trackMeter ? this.currentMode.trackMeter() : undefined
     });
     this.hud.setFPS(this.fps);
   }
@@ -501,5 +618,10 @@ export class Game {
   showStats() {
     const statsModal = new StatsUI(document.createElement('div'), this);
     this.overlay.show(statsModal.el);
+  }
+
+  showAimReport() {
+    const report = new AimReport(document.createElement('div'), this);
+    this.overlay.show(report.el);
   }
 }

@@ -21,6 +21,7 @@ python3 -m http.server 8001
 4. `animate()` computes dt -> weapon recoil/sway update -> FPS -> camera look -> mode update -> HUD update -> renderer draw.
 5. `shootAtCrosshair()` raycasts ACTIVE pooled targets and routes hit/miss to current mode.
    CRITICAL FIX: raycast over `pool.active` (always re-derive), never `pool.objects` — that array is the free stack, so active targets are not in it. Filtering alive `mesh.userData.target` keeps killed pop-corpses unhittable.
+6. CRITICAL FIX (Flick blink): NEVER schedule setTimeout lifetimes on pooled targets — the pool hands the SAME instance to the next target, and a stale timer later fires `if (t.active) release` against the NEW target (the "ball appears 0.1s, vanishes, respawns" cycle after ~2 shots). Target lifetimes must be timestamp-based: `spawnedAt` + `lifeMs` reaped in the mode's `update()` (StaticMode pattern), and instant kill on hit. FlickMode was rewritten this way.
 
 **Camera Look Limits (intentional design)**
 - Targets always spawn at +Z in front of a back wall (z 5..13, x ±5, y 0.7..4.5). Keep new modes inside this range.
@@ -33,7 +34,8 @@ python3 -m http.server 8001
 
 **3D Environment (src/core/Scene.js)**
 - Enclosed room: floor, two side walls, back wall at z=14.5, CEILING at y=9 with warm emissive light panels + soft point glows.
-- Neon cyan strips frame the back wall; cyan point glow near wall. Fog matches bg color 0x10151d.
+- Back wall is now a PROPER visible wall: lighter material (0x323c4c) + base emissive lift, plane ROTATED π so its lit face points at the player (it used to face away and render as a black plane), skirting board at the floor line, faint vertical panel seams, warm glow SpotLight + cyan PointLight from buildAccents. Old neon framing strips are gone — don't reintroduce floating accent lines in front of the wall.
+- Renderer uses PHYSICAL light units (three r155+ decay): point/spotlights need candela-scale intensities (~50-130 at these distances; legacy values like 0.25 are invisible). Fog matches bg color 0x10151d.
 - If you widen target spawn ranges, keep them INSIDE the room or targets spawn outside walls.
 
 **Weapon Viewmodel (src/core/Weapon.js)**
@@ -52,16 +54,23 @@ python3 -m http.server 8001
 - ESC behavior is now the full state machine described in "Session lifecycle".
 
 **Modes**
-- Implemented/selectable: `Static`, `Flick`, `Reaction`, `Tracking`.
+- Implemented/selectable: `Static`, `Flick`, `Click Track` (moved target, click it — smooth TargetMotion), `Hold Track` (hold LMB on drifting target, score = hold seconds), `Reaction`. (Old `TrackingMode.js` was replaced by `ClickTrackMode.js` both renamed /rewritten.)
 - `Static` (gridshot drill): 4 concurrent targets, each fades in (~220ms), holds, fades out (~700ms tail). Hit -> INSTANT pop: target leaves the live set same frame, a white scale-up pop-flash plays ~110ms (cosmetic corpse in `mode.corpses` only), replacement spawns immediately. Session is a 60s countdown (`mode.timeLeft` -> HUD "Time" row); on 0 runs `endSession`.
+- `Flick`: single target with timestamped short lifetime (max(400, 1200 - spawnSpeed*200) ms), repawns on timeout or hit.
+- `Click Track`: one strafing target, click it; +150 × combo per hit, respawn after hit. Movement via `TargetMotion` (see below) so speed changes are gradual; speed scales with the `movementSpeed` difficulty setting.
+- `Hold Track`: hold LMB with the crosshair on a drifting target; each held second = 100 points. HUD streak meter (`trackMeter()` on the mode) shows the CURRENT continuous hold vs the session's best hold. Target glows (emissive 3.2) while held. 45s session; summary shows "Longest hold".
 - `Reaction`: one ball after unknowable 0.5-3.0s delay; ball ages out after `1800 - spawnSpeed*250` ms (difficulty scales it, min 500ms). Hit -> reaction-time score (max 2000 - ms), stats track avg/best reaction. Vanish resets combo, next spawn follows. Shooting early = miss + combo reset.
-- Tracking mode bug fixed: now respawns a target after each hit (continuous loop).
-- Reaction mode safety fixed: clears stale target reference after release.
+- `TargetMotion` (`src/core/TargetMotion.js`): drift steering helper used by both track modes. Speed eases toward a re-rolled target every ~2s (SPEED_EASE), heading eases toward re-rolled headings and gets inward-biased steering near room margins (no instant stops/flips). Bounds: x ±4.6, y 0.9..4.2 — targets stay inside the room.
+- `Input.primaryDown` tracks LMB held (document-level mousedown/up) for hold-tracking.
 
-**Sensitivity (Marvel Rivals scale)**
-- `Game.updateCameraFromMouse` uses `sens * 0.0176 degrees per count` (Marvel Rivals/UE5 yaw constant, 0.8x Source's 0.022).
-- Pasting an exact Marvel Rivals sensitivity gives 1:1 turn speed; assumes browser `movementX` px = mouse counts (true at 100% OS scale & unzoomed Chrome; OS DPI scaling/zoom shifts it).
-- Quick keys `[` / `]` adjust the same value.
+**Sensitivity (multi-game profiles, `src/ui/GameProfiles.js`)**
+- Turn speed = `sens * profile.yaw` degrees per mouse count (`updateCameraFromMouse`). Each stored `settings.sensitivity` lives in its OWN game's scale; `settings.game` selects the profile.
+- Yaw table (verified against converter docs + pro-player cm/360 data): Marvel Rivals / OW2 / CoD(MW,Warzone,BO6) / The Finals / Destiny 2 = 0.0066; CS2/Apex/TF2/Quake = 0.022; Halo Infinite = 0.0225; Valorant = 0.07; R6 Siege = 0.00572958 (default multiplier); Fortnite = 0.005555 per X-axis %. Plus `custom` = 0.0176 (the old pre-profiles constant, kept reachable).
+- IMPORTANT: the old belief "MR = 0.0176 (UE5)" was WRONG — pro MR sens 4-8 at 800dpi gives 21-43 cm/360, which only fits 0.0066. MR sens transfers 1:1 to OW2/CoD/D2. Legacy saves (no `settings.game` key) are auto-converted once from the 0.0176 scale into the default profile so tuned feel is preserved.
+- Settings modal: game <select> + sens slider/number. Choosing a game converts the entered value (`changeGame`), so "paste sens in game X, switch dropdown to Y" is the converter. Pasting the selected game's own value = 1:1 feel (assumes browser `movementX` px = mouse counts, true at 100% OS scale & unzoomed Chrome).
+- Quick keys `[` / `]` adjust within the profile's min/max clamp. HUD shows e.g. `Sen: MR 6.67`.
+- Free-cursor mode: middle click during a session exits pointer lock (normal cursor, crosshair hidden, banner hint) and freezes gameplay (updates require `input.isLocked`); clicking the canvas or middle-clicking again re-locks and resumes. `pointerlockchange` auto-pause is skipped while `input.freeCursor`; all lifecycle resets (start/pause/resume/end) clear the flag to avoid the locked-cursor dead-end trap.
+- Fullscreen: `toggleFullscreen()` on Game, driven by the persistent top-right corner button `#fullscreen-btn` (usable in menus + free-cursor mode; pointer lock routes locked-session clicks to the canvas). Label syncs on `fullscreenchange` (`syncFullscreenLabel`).
 
 **Session lifecycle (new)**
 - A mode may set `this.finished = true`; `animate()` then calls `Game.endSession()`:
@@ -76,9 +85,10 @@ python3 -m http.server 8001
 - Losing pointer lock mid-session auto-pauses (browser often swallows the Esc keydown).
 
 **Stats**
-- Sessions are saved in `localStorage` via `StatsManager` key `aimlabs.sessions`.
-- Saved fields: mode, start/end, score, accuracy/hits/shots/etc. (mode dependent).
-- Stats modal shows list + lightweight canvas line chart.
+- Sessions are saved in `localStorage` via `StatsManager` key `aimlabs.sessions` (cap 500). `StatsManager.clear()` wipes them.
+- Stats modal: per-mode filter `<select>` ("All modes" + every stored mode), rows/chart filtered by it, two-step "Clear stats" confirm button, and an "Aim Report" shortcut.
+- Sessions store mode-specific detail: Static/Flick/ClickTrack score+accuracy+maxCombo; Reaction adds avgReaction/bestReaction/reactionSpread/reactionCount; Hold Track adds bestStreak + accuracy time-based (hits = seconds on target).
+- **Aim Report (`src/ui/AimReport.js` + `src/utils/AimProfile.js`)**: adds an "Aim Report" menu button (also in Stats modal). `computeAimProfile()` reads all stored sessions → 6 axes (Precision, Reaction, Tracking, Flicking, Consistency, Control) scored 0-100 with status chips, canvas HEXAGON radar (rings at 25/50/75/100, skill polygon + labels), overall + balance scores, "Practice plan" (weakest axes with drills/targets, unplayed-mode hints, inconsistency notes typed like typing-master), and a per-mode recent trend table (▲/▼ vs previous session). Missing-data axes show "Unplayed" and score 0 (polygon uses a tiny 2% floor so unplayed axes read as holes). Reaction axis calibrations: avg reaction (450-avg)/3 bands; tracking = 60% on-target% + 40% bestStreak/6s; consistency = 100 − CV×170 across 3+ sessions of the same mode.
 
 **Performance + Leak Prevention**
 - Target object pooling is used (`Pool.acquire/release`).

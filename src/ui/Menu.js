@@ -20,6 +20,7 @@ export class Menu {
     this.element.innerHTML = `
       <h2 class="neon-text">AimTrainer.js</h2>
       <button class="btn" data-action="start">Start Training</button>
+      <button class="btn" data-action="report">Aim Report</button>
       <button class="btn" data-action="settings">Settings</button>
       <button class="btn" data-action="stats">Stats</button>
       ${options.showResume ? '<button class="btn" data-action="resume">Resume</button>' : ''}
@@ -30,6 +31,7 @@ export class Menu {
         const action = btn.dataset.action;
         this.game.audio.play('click');
         if (action === 'start') this.game.showModeSelect();
+        if (action === 'report') this.game.showAimReport();
         if (action === 'settings') this.game.showSettings();
         if (action === 'stats') this.game.showStats();
         if (action === 'resume') this.game.resume && this.game.resume();

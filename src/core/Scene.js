@@ -42,11 +42,40 @@ export class GameScene {
     floor.receiveShadow = true;
     this.scene.add(floor);
 
-    /* Back wall sits just behind the furthest target spawn (z = 13) */
-    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, wallHeight), wallMat);
+    /* Back wall sits just behind the furthest target spawn (z = 13).
+       It is LIGHTER than the floor/side walls so it clearly reads as the
+       wall the range ends at, instead of blending into the gray room. */
+    const backWallMat = new THREE.MeshStandardMaterial({
+      color: 0x323c4c,
+      roughness: 0.85,
+      metalness: 0.0,
+      /* Base emissive lift: the hemisphere light alone is not enough brightness
+         for the wall to read at this distance */
+      emissive: 0x121a26,
+      emissiveIntensity: 1.0
+    });
+    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, wallHeight), backWallMat);
+    /* PlaneGeometry faces +Z by default; flip it so the lit face points at the
+       player (this is why the wall used to render as an unlit black plane) */
+    backWall.rotation.y = Math.PI;
     backWall.position.set(0, wallHeight / 2, 14.5);
     backWall.receiveShadow = true;
     this.scene.add(backWall);
+
+    /* Skirting board pins the wall to the floor line */
+    const skirtMat = new THREE.MeshStandardMaterial({ color: 0x4a5668, roughness: 0.8 });
+    const skirt = new THREE.Mesh(new THREE.BoxGeometry(roomWidth, 0.45, 0.12), skirtMat);
+    skirt.position.set(0, 0.22, 14.43);
+    this.scene.add(skirt);
+
+    /* Faint vertical panel seams give the wall surface real texture */
+    const seamMat = new THREE.MeshStandardMaterial({ color: 0x3a4556, roughness: 0.9 });
+    const halfSpan = roomWidth / 2 - 1.5;
+    for (let x = -halfSpan; x <= halfSpan; x += 3) {
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(0.04, wallHeight - 0.4, 0.03), seamMat);
+      seam.position.set(x, (wallHeight - 0.4) / 2 + 0.4, 14.47);
+      this.scene.add(seam);
+    }
 
     for (const side of [-1, 1]) {
       const wall = new THREE.Mesh(new THREE.PlaneGeometry(roomLength, wallHeight), wallMat.clone());
@@ -103,24 +132,19 @@ export class GameScene {
   }
 
   buildAccents() {
-    /* Thin neon strips frame the back wall and give the room depth */
-    const stripMat = new THREE.MeshStandardMaterial({
-      color: 0x0a0f14,
-      emissive: 0x00e5ff,
-      emissiveIntensity: 1.0
-    });
-
-    this.addBackWallStrip(stripMat, 5.4, 0.06, 22);
-    this.addBackWallStrip(stripMat, 1.8, 0.04, 16);
-
-    const glow = new THREE.PointLight(0x00e5ff, 0.35, 22);
-    glow.position.set(0, 3, 13.5);
+    /* Soft cyan wash over the back wall — placed well in front of the wall so
+       the falloff covers the whole surface, not a hot spot. Renderer uses
+       physical light units since r155, so point/spot intensities are candela. */
+    const glow = new THREE.PointLight(0x00e5ff, 55, 26, 2);
+    glow.position.set(0, 3.5, 11);
     this.scene.add(glow);
-  }
 
-  addBackWallStrip(material, height, thickness, width) {
-    const strip = new THREE.Mesh(new THREE.BoxGeometry(width, thickness, 0.02), material);
-    strip.position.set(0, height, 14.42);
-    this.scene.add(strip);
+    /* A warm spotlight aimed at the wall so the surface reads as an actual
+       lit wall instead of a flat black plane */
+    const wallSpot = new THREE.SpotLight(0xfff4e0, 130, 40, 0.85, 0.8, 2);
+    wallSpot.position.set(0, 8.4, 9.5);
+    wallSpot.target.position.set(0, 3, 14.5);
+    this.scene.add(wallSpot);
+    this.scene.add(wallSpot.target);
   }
 }
