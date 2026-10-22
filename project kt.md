@@ -110,6 +110,14 @@ python3 -m http.server 8001
 - Chrome caches JS modules with heuristic TTL (~10% of file age). Restart with a no-store server or bust URLs, or you may test stale code that MATCHES nothing on disk.
 - Headless screenshots: `agent-browser` with `AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable`. Pointer lock fails headless; use `window.game` evals to drive state.
 
+**Security posture (audited)**
+- Three.js is VENDORED at `src/vendor/three.module.js` (pinned r159) via `src/three-shim.js` — no third-party CDN code executes. Upgrade = replace the vendored file deliberately.
+- `firebase.json` sends security headers on hosting: CSP (script-src 'self'; inline styles required by the UI), nosniff, no-referrer, frame-ancestors/DENY, permissions lockout. Header set is validated locally by the scratchpad no-cache server (mirrors the same headers).
+- Crosshair config (round-trips localStorage) is sanitized in `mergeCrosshairConfig`: style whitelist, 6-digit hex color, numeric clamps. Never loosen it — that path feeds SVG markup.
+- Stats rows are built with DOM APIs (textContent), not innerHTML; layouts accept only object-shaped sessions.
+- `Storage` never throws on corrupt JSON (drops the key, uses fallback). Secrets: none in repo; workflow uses GitHub secrets only.
+- Dev affordance: `window.game` global intentionally exposed for debugging — remove for releases if paranoid.
+
 **Known Gaps / Next MVP Steps**
 - Add session duration limit with summary modal for other modes too (Static has it; Flick/Tracking/Reaction are endless).
 - Add one more focused mode (micro-adjustment).

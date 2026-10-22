@@ -37,7 +37,12 @@ export class StatsUI {
       const row = document.createElement('div');
       row.style.padding = '6px 4px';
       row.style.borderBottom = '1px solid rgba(0,255,255,0.04)';
-      row.innerHTML = `<strong>${s.mode}</strong> — ${Math.round((s.duration||0)/1000)}s — score: ${s.score||0} — hits:${s.hits||0} shots:${s.shots||0}`;
+      const title = document.createElement('strong');
+      title.textContent = typeof s.mode === 'string' ? s.mode : 'Session';
+      row.appendChild(title);
+      const detail = document.createElement('span');
+      detail.textContent = ` — ${Math.round((s.duration || 0) / 1000)}s — score: ${s.score || 0} — hits: ${s.hits || 0} shots: ${s.shots || 0}`;
+      row.appendChild(detail);
       this.listEl.appendChild(row);
     });
     this.drawChart(labels.reverse(), scores.reverse());

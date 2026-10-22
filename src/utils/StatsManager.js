@@ -4,7 +4,9 @@ const KEY = 'aimlabs.sessions';
 
 export class StatsManager {
   static list() {
-    return Storage.get(KEY, []);
+    const value = Storage.get(KEY, []);
+    /* localStorage can hold anything (manual edits other tools); never trust shape */
+    return Array.isArray(value) ? value.filter(s => s && typeof s === 'object' && !Array.isArray(s)) : [];
   }
 
   static push(session) {

@@ -15,8 +15,34 @@ export const CROSSHAIR_DEFAULTS = {
   opacity: 1
 };
 
+const STYLES = new Set(['cross', 'x', 't', 'circle', 'square']);
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+/* The config round-trips through localStorage, so validate every field:
+   only whitelisted styles and plain 6-digit hex colors reach the SVG markup. */
+function sanitize(stored) {
+  const raw = { ...CROSSHAIR_DEFAULTS, ...(stored || {}) };
+  const clamp = (value, min, max, fallback) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+  };
+
+  return {
+    style: STYLES.has(raw.style) ? raw.style : CROSSHAIR_DEFAULTS.style,
+    size: clamp(raw.size, 0, 40, CROSSHAIR_DEFAULTS.size),
+    thickness: clamp(raw.thickness, 0, 10, CROSSHAIR_DEFAULTS.thickness),
+    gap: clamp(raw.gap, 0, 24, CROSSHAIR_DEFAULTS.gap),
+    dot: raw.dot === true,
+    dotSize: clamp(raw.dotSize, 1, 20, CROSSHAIR_DEFAULTS.dotSize),
+    color: HEX_COLOR.test(raw.color) ? raw.color : CROSSHAIR_DEFAULTS.color,
+    outline: raw.outline === true,
+    rotation: ((clamp(raw.rotation, -360, 360, 0) % 360) + 360) % 360,
+    opacity: clamp(raw.opacity, 0.1, 1, CROSSHAIR_DEFAULTS.opacity)
+  };
+}
+
 export function mergeCrosshairConfig(stored) {
-  return { ...CROSSHAIR_DEFAULTS, ...(stored || {}) };
+  return sanitize(stored);
 }
 
 const CENTER = 50; // SVG viewBox is 100x100 with the crosshair at dead center
