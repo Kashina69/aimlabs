@@ -1,0 +1,457 @@
+/* Home launcher: rail (choose) on the left, stage (preview + drill card) on the right.
+   The 3D ghost run of the selected drill plays behind the stage. */
+
+.home {
+  display: grid;
+  grid-template-columns: clamp(340px, 30vw, 420px) 1fr;
+}
+
+/* ---------- Rail ---------- */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-5) var(--space-5);
+  background: oklch(0.18 0.012 250 / 0.96);
+  box-shadow: inset -1px 0 0 var(--line-soft);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.rail-head {
+  padding: 0 var(--space-3);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-body);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand svg {
+  width: 22px;
+  height: 22px;
+  color: var(--signal);
+}
+
+.rail-section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.rail-label {
+  padding: 0 var(--space-3);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--ink-3);
+}
+
+/* ---------- Drill rows ---------- */
+.drill-list {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+}
+
+.drill-row {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 10px;
+  text-align: left;
+  transition: background-color 150ms ease;
+}
+
+.drill-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink-3);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.drill-icon svg {
+  width: 36px;
+  height: 36px;
+}
+
+.drill-icon .hot {
+  fill: var(--ink-2);
+  stroke: none;
+  transition: fill 150ms ease;
+}
+
+.drill-text {
+  display: grid;
+  min-width: 0;
+}
+
+.drill-name {
+  font-weight: 500;
+}
+
+.drill-sub {
+  font-size: var(--text-ui);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drill-meta {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.drill-best {
+  font-size: var(--text-ui);
+  color: var(--ink-2);
+}
+
+.drill-best.is-empty {
+  color: var(--ink-3);
+}
+
+.drill-key {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.drill-row[aria-pressed='true'] {
+  background: var(--surface-2);
+}
+
+.drill-row[aria-pressed='true'] .drill-icon {
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+
+.drill-row[aria-pressed='true'] .drill-icon .hot {
+  fill: var(--signal);
+}
+
+.drill-row[aria-pressed='true'] .drill-sub {
+  color: var(--ink-2);
+}
+
+.drill-row:focus-visible .drill-key,
+.drill-row[aria-pressed='true'] .drill-key {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .drill-row:hover { background: oklch(0.23 0.012 250); }
+  .drill-row:hover .drill-key { opacity: 1; }
+}
+
+/* ---------- Loadout ---------- */
+.loadout {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  border-radius: 12px;
+  background: var(--surface-2);
+  text-align: left;
+  transition: background-color 150ms ease, transform var(--dur-press) var(--ease-out);
+}
+
+.loadout:active {
+  transform: scale(0.98);
+}
+
+.loadout-xh {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.loadout-stats {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.loadout-stats div,
+.card-stats div {
+  display: grid;
+  gap: 1px;
+}
+
+.loadout-stats dt,
+.card-stats dt {
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+.loadout-stats dd {
+  font-size: var(--text-ui);
+}
+
+.loadout-edit {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.loadout-nudge {
+  padding: 0 var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--ink-2);
+  max-width: 36ch;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .loadout:hover { background: var(--surface-3); }
+  .loadout:hover .loadout-edit { color: var(--ink); }
+}
+
+/* ---------- Rail footer ---------- */
+.rail-foot {
+  margin-top: auto;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.rail-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.rail-actions .btn {
+  gap: var(--space-2);
+}
+
+.rail-actions .kbd {
+  margin-left: 2px;
+}
+
+.rail-progress {
+  padding: 0 var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+/* ---------- Stage + drill card ---------- */
+.stage {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: var(--space-6) var(--inset);
+  min-width: 0;
+}
+
+/* Bottom shade so the card sits on darker ground than the bright target zone */
+.stage::before {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 55%;
+  pointer-events: none;
+  background: linear-gradient(0deg, oklch(0.13 0.012 250 / 0.85), transparent);
+}
+
+.drill-card {
+  position: relative;
+  width: min(780px, 100%);
+  padding: var(--space-5);
+  display: grid;
+  gap: var(--space-5);
+}
+
+.card-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(220px, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.card-main {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.card-title {
+  font-size: var(--text-display);
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.card-desc {
+  color: var(--ink-2);
+  font-size: var(--text-ui);
+  max-width: 48ch;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.facts li {
+  list-style: none;
+  font-size: var(--text-caption);
+  color: var(--ink-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.card-records {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+
+.card-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.card-stats dd {
+  font-size: var(--text-h3);
+  line-height: 1.15;
+}
+
+.card-records .sparkline {
+  width: 100%;
+  height: 32px;
+}
+
+.card-records.is-empty {
+  align-content: center;
+  min-height: 120px;
+  gap: var(--space-1);
+}
+
+.card-empty-title {
+  font-weight: 500;
+}
+
+.card-empty {
+  font-size: var(--text-ui);
+  color: var(--ink-2);
+}
+
+.card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-top: var(--space-4);
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+
+.card-difficulty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.card-start {
+  min-width: 220px;
+  justify-content: space-between;
+}
+
+.custom-difficulty {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  animation: rise 200ms var(--ease-out);
+}
+
+.custom-difficulty .field + .field {
+  margin-top: 0;
+}
+
+/* ---------- First open: rows settle in once ---------- */
+.home.is-entering .drill-row {
+  animation: rise 260ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+.home.is-entering .drill-card {
+  animation: rise 320ms var(--ease-out) 120ms both;
+}
+
+/* ---------- Narrow screens: one scrolling column over a dimmed range ---------- */
+@media (max-width: 979px) {
+  /* Single column in task order: brand, drills, the selected drill, loadout, links */
+  .home {
+    grid-template-columns: 1fr;
+    align-content: start;
+    gap: var(--space-6);
+    padding: var(--space-6) var(--space-4);
+    overflow-y: auto;
+    background: oklch(0.14 0.012 250 / 0.85);
+  }
+
+  .rail {
+    display: contents;
+  }
+
+  .rail-head { order: 1; }
+  .rail-drills { order: 2; }
+  .stage { order: 3; }
+  .rail-loadout { order: 4; }
+  .rail-foot { order: 5; margin-top: 0; }
+
+  .stage {
+    padding: 0;
+  }
+
+  .stage::before {
+    display: none;
+  }
+
+  .card-top,
+  .custom-difficulty {
+    grid-template-columns: 1fr;
+  }
+
+  .card-start {
+    width: 100%;
+  }
+}
+
+/* ---------- Mobile / touch gate ---------- */
+.gate {
+  display: grid;
+  place-content: center;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  background: var(--bg);
+}
+
+.gate h1 {
+  font-size: var(--text-display);
+}
+
+.gate p {
+  color: var(--ink-2);
+  max-width: 32ch;
+  margin: 0 auto;
+}

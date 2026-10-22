@@ -1,4 +1,7 @@
 import * as THREE from '../three-shim.js';
+import { tickSessionClock } from './sessionClock.js';
+
+const SESSION_SECONDS = 60;
 
 export class FlickMode {
   constructor(game) {
@@ -8,6 +11,8 @@ export class FlickMode {
     this.hits = 0;
     this.shots = 0;
     this.combo = 0;
+    this.maxCombo = 0;
+    this.timeLeft = SESSION_SECONDS;
     this._timers = [];
   }
 
@@ -32,13 +37,15 @@ export class FlickMode {
     this._timers.push(id);
   }
 
-  update() {
+  update(deltaMs = 16) {
+    if (tickSessionClock(this, deltaMs)) return;
     // refill targets to keep only 1 at a time
     this.targets = this.targets.filter(t => t.active);
     if (this.targets.length === 0) this.spawn();
   }
 
   onClick(intersects) {
+    if (this.finished) return;
     this.shots++;
     let hit = false;
     for (const i of intersects) {
@@ -48,6 +55,7 @@ export class FlickMode {
         this.game.pool.release(target);
         this.hits++;
         this.combo++;
+        this.maxCombo = Math.max(this.maxCombo, this.combo);
         this.score += 100 * this.combo;
         this.game.audio.play('hit');
         hit = true;
@@ -64,6 +72,13 @@ export class FlickMode {
     for (const t of Array.from(this.targets || [])) {
       try { if (t.active) t.deactivate(); this.game.pool.release(t); } catch(e){}
     }
-    return { accuracy: this.shots ? (this.hits / this.shots) * 100 : 0, score: this.score };
+    return {
+      accuracy: this.shots ? (this.hits / this.shots) * 100 : 0,
+      score: this.score,
+      hits: this.hits,
+      shots: this.shots,
+      maxCombo: this.maxCombo,
+      duration: SESSION_SECONDS * 1000
+    };
   }
 }

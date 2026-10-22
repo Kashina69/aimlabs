@@ -1,0 +1,409 @@
+/* Reusable controls: buttons, keycaps, fields, sliders, toggles, segmented, tabs, panels */
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-control);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--ink);
+  transition:
+    background-color var(--dur-ui) ease,
+    color var(--dur-ui) ease,
+    transform var(--dur-press) var(--ease-out);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-primary {
+  background: var(--signal);
+  color: var(--signal-ink);
+  font-weight: 600;
+}
+
+.btn-lg {
+  min-height: 48px;
+  padding: 0 var(--space-5);
+  font-size: var(--text-body);
+}
+
+.btn-text {
+  background: transparent;
+  color: var(--ink-2);
+  padding: 0 var(--space-2);
+}
+
+.btn-block {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.btn-icon {
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  background: transparent;
+  color: var(--ink-2);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover { background: var(--surface-3); }
+  .btn-primary:hover { background: var(--signal-hover); }
+  .btn-text:hover,
+  .btn-icon:hover { background: var(--surface-2); color: var(--ink); }
+}
+
+/* Keyboard hint that sits inside or next to a button */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--surface-1);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+
+.btn-primary .kbd {
+  color: var(--signal-ink);
+  background: oklch(0.2 0.05 122 / 0.12);
+  box-shadow: none;
+}
+
+/* ---------- Fields ---------- */
+.field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.field + .field {
+  margin-top: var(--space-5);
+}
+
+.field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.field-label {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.field-hint {
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.input {
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  color: var(--ink);
+  font-size: var(--text-ui);
+  transition: border-color var(--dur-ui) ease;
+}
+
+.input:focus-visible {
+  outline: none;
+  border-color: var(--signal);
+}
+
+.input-num {
+  width: 76px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.input-num::-webkit-inner-spin-button {
+  opacity: 0.4;
+}
+
+select.input {
+  padding-right: var(--space-6);
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-2) 50%),
+    linear-gradient(135deg, var(--ink-2) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* ---------- Range slider ---------- */
+.slider {
+  flex: 1;
+  height: 20px;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  --fill: 50%;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--ink-2) var(--fill), var(--surface-3) var(--fill));
+}
+
+.slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+
+.slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ink-2);
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 4px var(--bg);
+  transition: transform var(--dur-press) var(--ease-out);
+}
+
+.slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 4px var(--bg);
+}
+
+.slider:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.slider:focus-visible {
+  outline: none;
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--bg), 0 0 0 6px var(--signal);
+}
+
+/* ---------- Toggle switch (checkbox) ---------- */
+.switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  cursor: pointer;
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+
+.switch input {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  cursor: pointer;
+  transition: background-color var(--dur-ui) ease;
+}
+
+.switch input::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ink);
+  transition: transform var(--dur-ui) var(--ease-out);
+}
+
+.switch input:checked {
+  background: var(--signal);
+}
+
+.switch input:checked::after {
+  transform: translateX(16px);
+  background: var(--signal-ink);
+}
+
+.switch + .switch,
+.field + .switch,
+.switch + .field {
+  margin-top: var(--space-5);
+}
+
+/* ---------- Segmented control ---------- */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+.segmented button {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: 6px;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  color: var(--ink-2);
+  transition: background-color var(--dur-ui) ease, color var(--dur-ui) ease;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .segmented button:hover { color: var(--ink); }
+}
+
+/* ---------- Tabs ---------- */
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs button {
+  position: relative;
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  color: var(--ink-3);
+  border-radius: var(--radius-control);
+  transition: color var(--dur-ui) ease, background-color var(--dur-ui) ease;
+}
+
+.tabs button[aria-selected='true'] {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tabs button:hover { color: var(--ink); }
+}
+
+/* ---------- Swatches (target colour picker) ---------- */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.swatch {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  transition: transform var(--dur-press) var(--ease-out);
+}
+
+.swatch::before {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--swatch);
+}
+
+.swatch[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.swatch:active {
+  transform: scale(0.94);
+}
+
+/* ---------- Badge ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: 6px;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+
+.badge-quiet {
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+/* ---------- Panel ---------- */
+.panel {
+  background: var(--panel);
+  border-radius: var(--radius-panel);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.04), var(--shadow-panel);
+}
+
+/* ---------- Hold-to-confirm button (destructive) ---------- */
+.hold {
+  position: relative;
+  overflow: hidden;
+}
+
+.hold::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: oklch(0.68 0.17 25 / 0.35);
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 200ms var(--ease-out);
+}
+
+.hold.is-holding::before {
+  clip-path: inset(0 0 0 0);
+  transition: clip-path 1200ms linear;
+}
+
+.hold > * {
+  position: relative;
+}

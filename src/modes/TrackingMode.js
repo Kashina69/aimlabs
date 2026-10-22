@@ -1,10 +1,14 @@
 import * as THREE from '../three-shim.js';
+import { tickSessionClock } from './sessionClock.js';
+
+const SESSION_SECONDS = 60;
 
 export class TrackingMode {
   constructor(game) {
     this.game = game;
     this.target = null;
-    this.score = 0; this.hits = 0; this.shots = 0; this.combo = 0;
+    this.score = 0; this.hits = 0; this.shots = 0; this.combo = 0; this.maxCombo = 0;
+    this.timeLeft = SESSION_SECONDS;
     this.speed = this.game.settings.movementSpeed || 0.02;
   }
 
@@ -24,7 +28,8 @@ export class TrackingMode {
     this.game.scene.scene.add(this.target.mesh);
   }
 
-  update() {
+  update(deltaMs = 16) {
+    if (tickSessionClock(this, deltaMs)) return;
     if (!this.target || !this.target.active) return;
     this.target.mesh.position.x += this.vx * (this.game.settings.movementSpeed || 1);
     this.target.mesh.position.y += this.vy * (this.game.settings.movementSpeed || 1);
@@ -33,10 +38,11 @@ export class TrackingMode {
   }
 
   onClick(intersects) {
+    if (this.finished || !this.target) return;
     this.shots++;
     for (const i of intersects) {
       if (i.object === this.target.mesh) {
-        this.hits++; this.combo++; this.score += 150 * this.combo; this.game.audio.play('hit');
+        this.hits++; this.combo++; this.maxCombo = Math.max(this.maxCombo, this.combo); this.score += 150 * this.combo; this.game.audio.play('hit');
         this.target.deactivate();
         this.game.pool.release(this.target);
         this.target = null;
@@ -52,6 +58,13 @@ export class TrackingMode {
       try { if (this.target.active) this.target.deactivate(); this.game.pool.release(this.target); } catch(e){}
       this.target = null;
     }
-    return {score:this.score, accuracy: this.shots? (this.hits/this.shots)*100:0};
+    return {
+      score: this.score,
+      accuracy: this.shots ? (this.hits / this.shots) * 100 : 0,
+      hits: this.hits,
+      shots: this.shots,
+      maxCombo: this.maxCombo,
+      duration: SESSION_SECONDS * 1000
+    };
   }
 }

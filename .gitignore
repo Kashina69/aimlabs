@@ -70,3 +70,6 @@ node_modules/
 
 # Command Code local state (session data, learned preferences)
 .commandcode/
+
+# Local design skill notes (not part of the project)
+New folder/

@@ -1,180 +1,268 @@
 import * as THREE from '../three-shim.js';
+import { RoomEnvironment } from '../vendor/addons/environments/RoomEnvironment.js';
+import { buildPistol } from './weapon/PistolModel.js';
 
-/* Pistol viewmodel with a two-handed stance, built from small boxes/cylinders
-   so it reads like a proper gun instead of a single grey rectangle. Attached
-   to the camera so it always moves with the player's view. */
+const VIEW_FOV = 54;           // fixed vertical FOV for the gun, independent of the player's FOV
+/* Pistol sits bottom-right, about 60% on screen; the grip and rear run off the edge */
+const REST = { x: 0.115, y: -0.094, z: -0.29 };
+const REST_ROT = { x: 0.045, y: 0.17, z: 0.08 };
+const SHELL_COUNT = 6;
+const EQUIP_MS = 380;
+
+/* First-person pistol viewmodel. The gun lives in its own scene and camera and
+   is drawn after the range with depth cleared (Renderer.setOverlay), so it never
+   clips into walls and never stretches with a wide player FOV.
+   Public API used by Game: shoot(), sway(dx, dy), equip(), update(dt),
+   setVisible(), attachRoomLight(camera), resize(). */
 export class Weapon {
-  constructor(camera) {
-    this.camera = camera;
+  constructor() {
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(VIEW_FOV, window.innerWidth / window.innerHeight, 0.01, 5);
 
-    this.group = new THREE.Group();
-    this.basePosition = new THREE.Vector3(0.27, -0.23, -0.52);
-    this.baseRotation = new THREE.Euler(-0.02, 0.05, 0.02);
-
-    this.kick = 0;       // recoil amount 0..1
-    this.flashLife = 0;  // muzzle flash lifetime 0..1
+    this.kick = 0;
+    this.slideBack = 0;
+    this.flashLife = 0;
     this.swayX = 0;
     this.swayY = 0;
+    this.lagX = 0;
+    this.lagY = 0;
     this.time = 0;
+    this.equipStart = -Infinity;
 
     this.buildMaterials();
-    this.buildGun();
-    this.buildHands();
+    this.rig = new THREE.Group();
+    const pistol = buildPistol(this.mats);
+    this.slide = pistol.slide;
+    this.muzzle = pistol.muzzle;
+    this.port = pistol.port;
+    this.rig.add(pistol.root);
+    this.scene.add(this.rig);
+
+    this.buildLights();
     this.buildMuzzleFlash();
-    this.applyBaseTransform();
-
-    /* Small fill light so the dark gunmetal keeps its shape in a dark room */
-    const fill = new THREE.PointLight(0xcfe4ff, 0.35, 1.4);
-    fill.position.set(0.12, 0.18, 0.4);
-    this.group.add(fill);
-
-    camera.add(this.group);
+    this.buildShells();
+    this.applyRest(0, 0, 0, 0, 0);
   }
 
   buildMaterials() {
+    const grip = makeStippleTexture();
     this.mats = {
-      polymer: new THREE.MeshStandardMaterial({ color: 0x2c3138, roughness: 0.6, metalness: 0.3 }),
-      steel: new THREE.MeshStandardMaterial({ color: 0x565e69, roughness: 0.32, metalness: 0.85 }),
-      darkSteel: new THREE.MeshStandardMaterial({ color: 0x1e2329, roughness: 0.45, metalness: 0.65 }),
-      sight: new THREE.MeshStandardMaterial({ color: 0x050a0c, emissive: 0x00e5ff, emissiveIntensity: 2.2 }),
-      skin: new THREE.MeshStandardMaterial({ color: 0xb9835f, roughness: 0.8, metalness: 0.0 }),
-      skinShade: new THREE.MeshStandardMaterial({ color: 0x96684a, roughness: 0.85, metalness: 0.0 }),
-      sleeve: new THREE.MeshStandardMaterial({ color: 0x2a3240, roughness: 0.9, metalness: 0.0 })
+      slide: new THREE.MeshStandardMaterial({ color: 0x454b53, metalness: 0.55, roughness: 0.42 }),
+      slideDark: new THREE.MeshStandardMaterial({ color: 0x15181c, metalness: 0.6, roughness: 0.5 }),
+      barrel: new THREE.MeshStandardMaterial({ color: 0x8b929b, metalness: 0.95, roughness: 0.28 }),
+      bore: new THREE.MeshBasicMaterial({ color: 0x050607 }),
+      polymer: new THREE.MeshStandardMaterial({ color: 0x24282d, metalness: 0.05, roughness: 0.72, bumpMap: grip, bumpScale: 0.6 }),
+      polymerDark: new THREE.MeshStandardMaterial({ color: 0x181b1f, metalness: 0.1, roughness: 0.6 }),
+      fibre: new THREE.MeshBasicMaterial({ color: 0xc8f23c, toneMapped: false }),
+      brass: new THREE.MeshStandardMaterial({ color: 0xc8a25e, metalness: 1, roughness: 0.3 })
     };
   }
 
-  /* Small helper: add a box part at a local offset with optional rotation */
-  addBox(size, material, position, rotation = null) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), material);
-    mesh.position.set(position.x, position.y, position.z);
-    if (rotation) mesh.rotation.set(rotation.x, rotation.y, rotation.z);
-    this.group.add(mesh);
-    return mesh;
+  /* Lighting roughly matches the range: cool sky fill, soft key from above-left, a rim from behind */
+  buildLights() {
+    this.scene.add(new THREE.HemisphereLight(0xc4cfdc, 0x1a1f25, 1.2));
+    const key = new THREE.DirectionalLight(0xffffff, 1.8);
+    key.position.set(-0.6, 1.2, 0.4);
+    const rim = new THREE.DirectionalLight(0xdfe7f0, 1.4);
+    rim.position.set(0.8, 0.4, -1.2);
+    this.scene.add(key, rim);
   }
 
-  buildGun() {
-    /* Frame and slide carry the silhouette; everything else is small detail blocks */
-    this.addBox({ x: 0.066, y: 0.072, z: 0.26 }, this.mats.polymer, { x: 0, y: 0.03, z: 0 });
-    this.addBox({ x: 0.072, y: 0.05, z: 0.3 }, this.mats.steel, { x: 0, y: 0.092, z: 0.012 });
-    this.addBox({ x: 0.076, y: 0.022, z: 0.09 }, this.mats.darkSteel, { x: 0, y: 0.096, z: 0.13 });
-
-    /* Slide serrations for the "realistic, not low-poly" read */
-    for (let i = 0; i < 4; i++) {
-      this.addBox({ x: 0.078, y: 0.036, z: 0.004 }, this.mats.darkSteel, { x: 0, y: 0.092, z: 0.095 + i * 0.012 });
+  /* Reflections for metal parts: a neutral studio environment, gun scene only */
+  initEnvironment(renderer) {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    for (const mat of Object.values(this.mats)) {
+      if (mat.isMeshStandardMaterial) mat.envMapIntensity = mat.metalness > 0.5 ? 0.9 : 0.3;
     }
-
-    /* Barrel and muzzle */
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.045, 12), this.mats.darkSteel);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.096, -0.165);
-    this.group.add(barrel);
-
-    /* Sights: glowing front dot, two rear posts */
-    this.addBox({ x: 0.014, y: 0.02, z: 0.01 }, this.mats.darkSteel, { x: 0, y: 0.125, z: -0.115 });
-    this.addBox({ x: 0.007, y: 0.007, z: 0.007 }, this.mats.sight, { x: 0, y: 0.137, z: -0.115 });
-    for (const side of [-1, 1]) {
-      this.addBox({ x: 0.01, y: 0.018, z: 0.01 }, this.mats.darkSteel, { x: side * 0.014, y: 0.125, z: 0.135 });
-    }
-
-    /* Grip: slopes down and back from the frame */
-    this.addBox({ x: 0.056, y: 0.2, z: 0.078 }, this.mats.polymer, { x: 0, y: -0.075, z: 0.105 }, { x: -0.28, y: 0, z: 0 });
-    this.addBox({ x: 0.062, y: 0.012, z: 0.082 }, this.mats.darkSteel, { x: 0, y: -0.172, z: 0.131 }, { x: -0.28, y: 0, z: 0 });
-
-    /* Trigger guard, trigger and ejection port */
-    this.addBox({ x: 0.03, y: 0.01, z: 0.055 }, this.mats.polymer, { x: 0, y: -0.016, z: 0.028 });
-    this.addBox({ x: 0.03, y: 0.05, z: 0.008 }, this.mats.polymer, { x: 0, y: -0.045, z: 0 });
-    this.addBox({ x: 0.012, y: 0.03, z: 0.006 }, this.mats.darkSteel, { x: 0, y: -0.045, z: 0.02 }, { x: 0.15, y: 0, z: 0 });
-    this.addBox({ x: 0.02, y: 0.028, z: 0.05 }, this.mats.darkSteel, { x: 0.04, y: 0.098, z: 0.02 });
   }
 
-  buildHands() {
-    /* Right hand: palm on the right of the grip, fingers wrap around the front,
-       trigger finger forward, thumb high on the frame */
-    this.addBox({ x: 0.05, y: 0.085, z: 0.085 }, this.mats.skin, { x: 0.045, y: -0.055, z: 0.125 }, { x: -0.2, y: 0, z: 0 });
-    for (let i = 0; i < 4; i++) {
-      this.addBox({ x: 0.03, y: 0.036, z: 0.018 }, this.mats.skinShade,
-        { x: -0.012, y: -0.028 - i * 0.036, z: 0.062 }, { x: 0, y: Math.PI / 2, z: 0.25 });
-    }
-    this.addBox({ x: 0.014, y: 0.032, z: 0.014 }, this.mats.skin, { x: 0.03, y: -0.03, z: 0.026 }, { x: 0.35, y: 0, z: 0 });
-    this.addBox({ x: 0.016, y: 0.05, z: 0.055 }, this.mats.skin, { x: -0.02, y: 0.015, z: 0.09 }, { x: 0.3, y: 0, z: -0.2 });
-
-    /* Left support hand: palm backing the right hand, fingers laced over it */
-    this.addBox({ x: 0.048, y: 0.08, z: 0.09 }, this.mats.skinShade, { x: -0.045, y: -0.06, z: 0.185 }, { x: -0.25, y: 0, z: 0.35 });
-    for (let i = 0; i < 4; i++) {
-      this.addBox({ x: 0.028, y: 0.034, z: 0.016 }, this.mats.skin,
-        { x: 0.02, y: -0.03 - i * 0.034, z: 0.155 }, { x: 0, y: Math.PI / 2, z: -0.2 });
-    }
-
-    /* Forearms angled off toward the bottom corners of the screen */
-    this.addBox({ x: 0.06, y: 0.06, z: 0.2 }, this.mats.skin, { x: 0.105, y: -0.24, z: 0.3 }, { x: 0.75, y: 0, z: -0.18 });
-    this.addBox({ x: 0.07, y: 0.07, z: 0.2 }, this.mats.sleeve, { x: 0.16, y: -0.35, z: 0.46 }, { x: 0.75, y: 0, z: -0.18 });
-    this.addBox({ x: 0.06, y: 0.06, z: 0.2 }, this.mats.skinShade, { x: -0.12, y: -0.26, z: 0.33 }, { x: 0.75, y: 0, z: 0.22 });
-    this.addBox({ x: 0.07, y: 0.07, z: 0.2 }, this.mats.sleeve, { x: -0.18, y: -0.38, z: 0.5 }, { x: 0.75, y: 0, z: 0.22 });
-  }
-
+  /* Star flash: two crossed planes with a 4-spike canvas texture, additive */
   buildMuzzleFlash() {
-    this.flashLight = new THREE.PointLight(0xffc98a, 0, 5);
-    this.flashLight.position.set(0, 0.096, -0.2);
-    this.group.add(this.flashLight);
-
-    this.flashMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.09, 0.09),
-      new THREE.MeshBasicMaterial({
-        color: 0xffd9a0,
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide
-      })
-    );
-    this.flashMesh.position.set(0, 0.096, -0.21);
-    this.group.add(this.flashMesh);
+    const material = new THREE.MeshBasicMaterial({
+      map: makeFlashTexture(), color: 0xffd9a8, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false
+    });
+    this.flash = new THREE.Group();
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(0.075, 0.075), material);
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.05), material);
+    side.rotation.y = Math.PI / 2;
+    side.position.z = -0.03;
+    this.flash.add(front, side);
+    this.flash.visible = false;
+    this.muzzle.add(this.flash);
+    this.flashMaterial = material;
   }
 
-  applyBaseTransform() {
-    this.group.position.copy(this.basePosition);
-    this.group.rotation.copy(this.baseRotation);
+  /* Pooled brass casings thrown out of the ejection port */
+  buildShells() {
+    const geometry = new THREE.CylinderGeometry(0.0045, 0.0045, 0.019, 12);
+    geometry.rotateZ(Math.PI / 2);
+    this.shells = Array.from({ length: SHELL_COUNT }, () => {
+      const mesh = new THREE.Mesh(geometry, this.mats.brass);
+      mesh.visible = false;
+      this.scene.add(mesh);
+      return { mesh, life: 0, vel: new THREE.Vector3(), spin: new THREE.Vector3() };
+    });
+    this.nextShell = 0;
+    this.tmp = new THREE.Vector3();
   }
 
-  /* Called on each shot: drives recoil and the muzzle flash */
+  /* A brief warm light in the RANGE scene, so each shot lights the room for a frame or two */
+  attachRoomLight(worldCamera) {
+    this.roomLight = new THREE.PointLight(0xffc98a, 0, 6, 2);
+    this.roomLight.position.set(0.25, -0.1, -0.6);
+    worldCamera.add(this.roomLight);
+  }
+
+  setVisible(visible) {
+    this.rig.visible = visible;
+    for (const shell of this.shells) if (!visible) shell.mesh.visible = false;
+  }
+
+  resize() {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+  }
+
+  /* Raise the gun into view when a drill starts */
+  equip() {
+    this.equipStart = performance.now();
+  }
+
   shoot() {
     this.kick = 1;
+    this.slideBack = 1;
     this.flashLife = 1;
+    this.flash.rotation.z = Math.random() * Math.PI;
+    const s = 0.85 + Math.random() * 0.3;
+    this.flash.scale.set(s, s, s);
+    this.ejectShell();
   }
 
-  /* Feeds raw mouse movement into a small sway offset so the gun feels held */
+  ejectShell() {
+    if (!this.rig.visible) return;
+    const shell = this.shells[this.nextShell];
+    this.nextShell = (this.nextShell + 1) % SHELL_COUNT;
+    this.rig.updateMatrixWorld(true);
+    this.port.getWorldPosition(shell.mesh.position);
+    shell.vel.set(0.9 + Math.random() * 0.4, 0.75 + Math.random() * 0.3, 0.15 + Math.random() * 0.2);
+    shell.spin.set(Math.random() * 30, Math.random() * 30, 20 + Math.random() * 20);
+    shell.life = 0.6;
+    shell.mesh.visible = true;
+  }
+
+  /* Mouse movement feeds a small lag so the gun trails the view slightly */
   sway(dx, dy) {
-    this.swayX = THREE.MathUtils.clamp(this.swayX + dx * 0.0012, -0.02, 0.02);
-    this.swayY = THREE.MathUtils.clamp(this.swayY + dy * 0.0012, -0.02, 0.02);
+    this.swayX = THREE.MathUtils.clamp(this.swayX + dx * 0.9, -0.03, 0.03);
+    this.swayY = THREE.MathUtils.clamp(this.swayY + dy * 0.9, -0.03, 0.03);
   }
 
   update(dt) {
     this.time += dt;
 
-    const settle = Math.min(1, dt * 14);
-    this.kick = Math.max(0, this.kick - settle * this.kick);
-    this.flashLife = Math.max(0, this.flashLife - dt * 22);
-    this.swayX *= Math.max(0, 1 - dt * 8);
-    this.swayY *= Math.max(0, 1 - dt * 8);
+    /* Recoil springs back fast, slide returns faster than the kick */
+    this.kick = Math.max(0, this.kick - dt * 9 * (0.4 + this.kick));
+    this.slideBack = Math.max(0, this.slideBack - dt * 16);
+    this.flashLife = Math.max(0, this.flashLife - dt * 30);
+    this.swayX *= Math.max(0, 1 - dt * 10);
+    this.swayY *= Math.max(0, 1 - dt * 10);
+    this.lagX += (this.swayX - this.lagX) * Math.min(1, dt * 12);
+    this.lagY += (this.swayY - this.lagY) * Math.min(1, dt * 12);
 
-    const idleBob = Math.sin(this.time * 1.3) * 0.0025;
-    this.group.position.set(
-      this.basePosition.x + this.swayX,
-      this.basePosition.y + this.swayY + idleBob,
-      this.basePosition.z + this.kick * 0.06
-    );
-    this.group.rotation.set(
-      this.baseRotation.x + this.kick * 0.22 + this.swayY * 3,
-      this.baseRotation.y - this.swayX * 2,
-      this.baseRotation.z + this.kick * 0.05
-    );
+    const equip = Math.min(1, (performance.now() - this.equipStart) / EQUIP_MS);
+    const lower = 1 - (1 - Math.pow(1 - equip, 3));
+    const breathe = Math.sin(this.time * 1.4) * 0.0012;
+    this.applyRest(this.kick, this.lagX, this.lagY, breathe, lower);
 
-    const flash = this.flashLife * this.flashLife;
-    this.flashLight.intensity = flash * 9;
-    this.flashMesh.material.opacity = flash * 0.85;
-    this.flashMesh.rotation.z = this.time * 30;
-    const flashScale = 0.8 + this.kick * 0.5;
-    this.flashMesh.scale.set(flashScale, flashScale, flashScale);
+    /* Slide blowback travels about 2.4cm on the frame */
+    this.slide.position.z = Math.sin(Math.min(1, this.slideBack) * Math.PI * 0.5) * 0.024;
+
+    const flash = this.flashLife > 0 ? this.flashLife * this.flashLife : 0;
+    this.flash.visible = flash > 0.01;
+    this.flashMaterial.opacity = flash;
+    if (this.roomLight) this.roomLight.intensity = flash * 18;
+
+    for (const shell of this.shells) {
+      if (shell.life <= 0) continue;
+      shell.life -= dt;
+      if (shell.life <= 0) {
+        shell.mesh.visible = false;
+        continue;
+      }
+      shell.vel.y -= 4.5 * dt;
+      shell.mesh.position.addScaledVector(shell.vel, dt);
+      shell.mesh.rotation.x += shell.spin.x * dt;
+      shell.mesh.rotation.y += shell.spin.y * dt;
+      shell.mesh.rotation.z += shell.spin.z * dt;
+    }
   }
+
+  /* Places the rig at rest plus recoil, sway lag, breathing and equip lowering */
+  applyRest(kick, lagX, lagY, breathe, lower) {
+    this.rig.position.set(
+      REST.x - lagX * 0.6,
+      REST.y + lagY * 0.6 + breathe - lower * 0.16 - kick * 0.004,
+      REST.z + kick * 0.03
+    );
+    this.rig.rotation.set(
+      REST_ROT.x + kick * 0.16 + lagY * 1.2 - lower * 0.7,
+      REST_ROT.y + lagX * 1.4,
+      REST_ROT.z - lagX * 0.6 + lower * 0.2
+    );
+  }
+}
+
+/* Fine noise used as a bump map: reads as grip stippling up close */
+function makeStippleTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(size, size);
+  for (let i = 0; i < image.data.length; i += 4) {
+    const v = 110 + Math.random() * 120;
+    image.data[i] = image.data[i + 1] = image.data[i + 2] = v;
+    image.data[i + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(30, 30);
+  return texture;
+}
+
+/* Soft core plus four tapered spikes */
+function makeFlashTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const c = size / 2;
+  const core = ctx.createRadialGradient(c, c, 0, c, c, c * 0.55);
+  core.addColorStop(0, 'rgba(255,255,255,1)');
+  core.addColorStop(0.35, 'rgba(255,220,160,0.85)');
+  core.addColorStop(1, 'rgba(255,160,60,0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(0, 0, size, size);
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 4; i++) {
+    ctx.save();
+    ctx.translate(c, c);
+    ctx.rotate((i * Math.PI) / 2 + 0.2);
+    const spike = ctx.createLinearGradient(0, 0, c, 0);
+    spike.addColorStop(0, 'rgba(255,230,180,0.9)');
+    spike.addColorStop(1, 'rgba(255,170,80,0)');
+    ctx.fillStyle = spike;
+    ctx.beginPath();
+    ctx.moveTo(0, -5);
+    ctx.lineTo(c, 0);
+    ctx.lineTo(0, 5);
+    ctx.fill();
+    ctx.restore();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }

@@ -1,16 +1,29 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AimTrainer.js</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AimLabs</title>
+  <meta name="description" content="A lightweight 3D aim trainer that runs in your browser. Gridshot, flick, tracking and reaction drills with honest stats." />
+  <meta name="theme-color" content="#090e12" />
+  <meta property="og:title" content="AimLabs" />
+  <meta property="og:description" content="Browser aim trainer: short drills, honest numbers." />
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preload" href="assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="assets/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/components.css" />
+  <link rel="stylesheet" href="styles/home.css" />
+  <link rel="stylesheet" href="styles/game.css" />
+  <link rel="stylesheet" href="styles/results.css" />
+  <link rel="stylesheet" href="styles/settings.css" />
+  <link rel="stylesheet" href="styles/stats.css" />
   <script type="module" src="./main.js"></script>
 </head>
 <body>
-  <div id="container"></div>
+  <main id="container" aria-label="3D training range"></main>
   <div id="ui-root"></div>
-  <div id="crosshair" class="crosshair"></div>
+  <div id="crosshair" aria-hidden="true"></div>
 </body>
 </html>

@@ -1,30 +1,51 @@
-import { Camera } from './Camera.js';
 import * as THREE from '../three-shim.js';
+import { Camera } from './Camera.js';
 import { Input } from './Input.js';
 import { Renderer } from './Renderer.js';
 import { GameScene } from './Scene.js';
 import { Pool } from './Pool.js';
-import { Target } from './Target.js';
+import { Target, setTargetColor } from './Target.js';
 import { Weapon } from './Weapon.js';
+import { getQuality } from './Quality.js';
+import { targetColorHex } from './palette.js';
+import { loadSelectableModes } from './ModeRegistry.js';
+import { Shards } from '../fx/Shards.js';
+import { MissMarks } from '../fx/MissMarks.js';
+import { MenuPreview } from '../fx/MenuPreview.js';
 import { AudioManager } from '../audio/AudioManager.js';
 import { Storage } from '../utils/Storage.js';
-import { Menu } from '../ui/Menu.js';
-import { HUD } from '../ui/HUD.js';
-import { Settings } from '../ui/Settings.js';
-import { StatsUI } from '../ui/Stats.js';
 import { StatsManager } from '../utils/StatsManager.js';
+import { bestFor } from '../utils/records.js';
+import { DIFFICULTY_PRESETS } from '../modes/catalog.js';
+import { HUD } from '../ui/HUD.js';
+import { SettingsDrawer } from '../ui/Settings.js';
+import { StatsPage } from '../ui/Stats.js';
 import { OverlayManager } from '../ui/OverlayManager.js';
+import { HomeScreen } from '../ui/screens/Home.js';
+import { createPauseScreen } from '../ui/screens/Pause.js';
+import { createResultsScreen } from '../ui/screens/Results.js';
+import { createLockPrompt, createCountdown, createDeviceGate } from '../ui/screens/Prompts.js';
 import { buildCrosshairSVG, mergeCrosshairConfig } from '../ui/Crosshair.js';
-import { loadSelectableModes } from './ModeRegistry.js';
 
 /* Marvel Rivals (UE5) yaw constant: degrees turned per mouse count per
    sensitivity point. Using it 1:1 lets you paste the exact MR sens value
    and get the identical turn speed (browser movementX px ≈ mouse counts). */
 const MARVEL_RIVALS_YAW_DEG = 0.0176;
+const COUNTDOWN_STEP_MS = 400;
+const LOCK_PROMPT_DELAY_MS = 250;
+const SHOT_LOG_LIMIT = 400;
+const SCREEN_CENTER = new THREE.Vector2(0, 0);
 
+/* Session phases (this.phase):
+   idle      home / stats, no drill
+   arming    drill created, waiting for pointer lock (lock prompt may show)
+   countdown 3-2-1 while locked, targets not spawned yet
+   live      playing
+   resuming  unpausing a live drill, waiting for pointer lock again
+   paused    pause sheet open, drill frozen
+   results   results screen, drill finished and saved */
 export class Game {
   constructor() {
-    this.container = document.getElementById('container');
     this.uiRoot = document.getElementById('ui-root');
     this.crosshair = document.getElementById('crosshair');
 
@@ -41,22 +62,34 @@ export class Game {
       }
     );
 
-    /* Weapon lives on the camera, and the camera must be in the scene for it to render */
+    /* The gun renders as an overlay pass with its own camera; the world camera is
+       added to the range scene so the shot light parented to it renders */
     this.scene.scene.add(this.camera.instance);
-    this.weapon = new Weapon(this.camera.instance);
-    this.lastFrameTime = 0;
+    this.weapon = new Weapon();
+    this.weapon.initEnvironment(this.renderer.renderer);
+    this.weapon.attachRoomLight(this.camera.instance);
+    this.renderer.setOverlay(this.weapon.scene, this.weapon.camera);
+    this.shards = new Shards(this.scene.scene, this.camera.instance);
+    this.missMarks = new MissMarks(this.scene.scene);
+    this.preview = new MenuPreview(this.scene.scene, this.shards);
+    this.raycaster = new THREE.Raycaster();
 
     this.settings = this.loadSettings();
+    this.modes = {};
+    this.phase = 'idle';
     this.currentMode = null;
     this.currentModeName = null;
-    this.isRunning = false;
-    this.sessionStart = 0;
+    this.lastModeName = null;
+    this.session = null;
+    this.settingsDrawer = null;
+    this.home = null;
+
     this.fps = 60;
     this.frameCount = 0;
-    this.lastTime = 0;
-    this.uiTimers = [];
+    this.lastFpsTime = 0;
+    this.lastFrameTime = 0;
 
-    this.initUI();
+    this.initLayers();
     try {
       window.game = this;
     } catch (error) {
@@ -64,238 +97,307 @@ export class Game {
     }
   }
 
-  /* What/why/how: Build persistent UI layers once so mode/menu switches do not destroy HUD elements. */
-  initUI() {
+  /* ---------- Setup ---------- */
+
+  /* UI layers, bottom to top: HUD, overlay (one screen at a time), settings drawer, prompts */
+  initLayers() {
     this.uiRoot.innerHTML = '';
-    this.persistentLayer = document.createElement('div');
-    this.persistentLayer.id = 'ui-persistent';
-    this.overlayLayer = document.createElement('div');
-    this.overlayLayer.id = 'ui-overlay';
-    this.uiRoot.appendChild(this.persistentLayer);
-    this.uiRoot.appendChild(this.overlayLayer);
+    const layer = (id) => {
+      const el = document.createElement('div');
+      el.id = id;
+      this.uiRoot.appendChild(el);
+      return el;
+    };
+    this.persistentLayer = layer('ui-persistent');
+    this.overlayLayer = layer('ui-overlay');
+    this.drawerLayer = layer('ui-drawer');
+    this.promptLayer = layer('ui-prompt');
     this.overlay = new OverlayManager(this.overlayLayer);
-
     this.crosshair.style.display = 'none';
-    this.createWeaponFeedbackUI();
-  }
-
-  createWeaponFeedbackUI() {
-    this.hitMarker = document.createElement('div');
-    this.hitMarker.id = 'hit-marker';
-    this.hitMarker.style.cssText = 'position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:140px; height:140px; border-radius:50%; border:2px solid rgba(0,255,255,0.0); pointer-events:none; transition:all 0.12s ease; z-index:10000;';
-    this.persistentLayer.appendChild(this.hitMarker);
   }
 
   loadSettings() {
     return {
       sensitivity: Storage.get('settings.sensitivity', 2.5),
-      fov: Storage.get('settings.fov', 90),
-      crosshair: Storage.get('settings.crosshair', { size: 6, color: '#0ff', thickness: 1, dot: false }),
+      dpi: Storage.get('settings.dpi', 800),
+      fov: Storage.get('settings.fov', 103),
+      invertY: Storage.get('settings.invertY', false),
+      crosshair: Storage.get('settings.crosshair', null),
       volume: Storage.get('audio.volume', 0.7),
+      hitSound: Storage.get('audio.hitSound', 'tick'),
       graphics: Storage.get('settings.graphics', 'medium'),
+      showWeapon: Storage.get('settings.showWeapon', true),
+      showMeta: Storage.get('settings.showMeta', true),
+      targetColor: Storage.get('settings.targetColor', 'lime'),
+      difficulty: Storage.get('settings.difficulty', 'normal'),
       targetSize: Storage.get('settings.targetSize', 0.3),
       spawnSpeed: Storage.get('settings.spawnSpeed', 1),
-      movementSpeed: Storage.get('settings.movementSpeed', 1),
-      invertY: Storage.get('settings.invertY', false)
+      movementSpeed: Storage.get('settings.movementSpeed', 1)
     };
   }
 
-  init() {
+  async init() {
     this.bindEvents();
     this.hud = new HUD(this.persistentLayer, this);
-    this.setInGameUI(false);
-    this.showMainMenu(false);
     this.applySettings();
-    this.animate(0);
+    requestAnimationFrame((time) => this.animate(time));
+
+    if (isTouchOnlyDevice()) {
+      this.overlay.show(createDeviceGate());
+      return;
+    }
+    this.modes = await loadSelectableModes();
+    this.showHome({ animate: true });
   }
 
   bindEvents() {
     window.addEventListener('resize', () => {
-      this.camera.instance.aspect = window.innerWidth / window.innerHeight;
-      this.camera.instance.updateProjectionMatrix();
+      this.camera.updateFOV();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.weapon.resize();
+      if (this.phase === 'idle' && this.overlay.is('home')) this.applyHomeViewOffset();
     });
 
-    document.addEventListener('keydown', (event) => this.handleGlobalKeydown(event));
+    document.addEventListener('keydown', (event) => this.handleKeydown(event));
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && this.isRunning) this.pause();
+      if (document.hidden) this.pause();
     });
 
-    /* Losing pointer lock mid-session (Esc key is often swallowed by the browser)
-       must pause instead of leaving a frozen "running but unlocked" state */
-    document.addEventListener('pointerlockchange', () => {
-      if (!document.pointerLockElement && this.isRunning) this.pause();
-    });
+    /* Losing pointer lock mid-drill (Esc is usually swallowed by the browser) pauses;
+       gaining it starts the countdown or resumes play */
+    document.addEventListener('pointerlockchange', () => this.onPointerLockChange());
 
-    this.renderer.canvas.addEventListener('mousedown', () => {
-      if (!this.isRunning || !this.input.isLocked) return;
-      this.shootAtCrosshair();
+    this.renderer.canvas.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      if (this.phase === 'live' && this.input.isLocked) this.shootAtCrosshair();
     });
   }
 
-  /* Escape is the single "get me somewhere sane" key:
-     - pause menu open + session exists -> resume (Escape toggles pause, like any FPS)
-     - other modal open  -> close it and land somewhere usable (menu when paused)
-     - running           -> pause (shows main menu)
-     - idle              -> open settings so Escape always does something useful */
-  handleGlobalKeydown(event) {
+  /* ---------- Keyboard ---------- */
+
+  /* Esc is the single "get me somewhere sane" key:
+     settings open -> close it; playing -> pause; paused -> resume;
+     results / stats -> home; home -> open settings */
+  handleKeydown(event) {
+    const typing = event.target?.matches?.('input, select, textarea');
+
     if (event.code === 'Escape') {
-      if (this.input.isLocked && !this.isRunning) {
-        this.input.unlock();
-      }
-      if (this.overlay.activeOverlay) {
-        if (this.overlay.activeOverlay.id === 'main-menu' && this.currentMode) {
-          this.resume();
-          return;
-        }
-        this.overlay.close();
-        if (!this.isRunning) this.showMainMenu(!!this.currentMode);
-        return;
-      }
-      if (this.isRunning) {
-        this.pause();
-        return;
-      }
-      this.showSettings();
+      if (this.settingsDrawer) return this.closeSettings();
+      if (['live', 'countdown', 'arming', 'resuming'].includes(this.phase)) return this.pause();
+      /* Chrome can deliver the same Esc as both a lock exit and a keydown; ignore the echo */
+      if (this.phase === 'paused') return performance.now() - this.pausedAt > 300 ? this.resume() : undefined;
+      if (this.phase === 'results' || this.overlay.is('stats')) return this.showHome();
+      return this.openSettings();
+    }
+
+    if (typing || event.repeat) {
+      if (!typing && (event.code === 'BracketLeft' || event.code === 'BracketRight')) this.handleSensKey(event);
       return;
     }
 
-    if (event.code === 'KeyR') this.restart();
-    if (event.code === 'BracketLeft') this.adjustSensitivityBy(-0.05);
-    if (event.code === 'BracketRight') this.adjustSensitivityBy(0.05);
+    if (event.code === 'KeyR' && this.phase !== 'idle') return this.restart();
+    if (event.code === 'BracketLeft' || event.code === 'BracketRight') return this.handleSensKey(event);
+
+    const onHome = this.phase === 'idle' && this.overlay.is('home') && !this.settingsDrawer;
+    if (!onHome) return;
+    if (event.code === 'Enter' && !event.target?.matches?.('button')) return this.home.start();
+    if (event.code === 'ArrowUp' || event.code === 'ArrowDown') return this.home.moveSelection(event);
+    if (/^Digit[1-9]$/.test(event.code)) return this.home.selectByNumber(Number(event.code.slice(5)));
+    if (event.code === 'KeyS') return this.showStats();
+    if (event.code === 'Comma') return this.openSettings();
   }
 
-  adjustSensitivityBy(delta) {
-    this.settings.sensitivity = Math.max(0.01, Math.min(12, this.settings.sensitivity + delta));
-    Storage.set('settings.sensitivity', this.settings.sensitivity);
+  handleSensKey(event) {
+    const delta = event.code === 'BracketLeft' ? -0.05 : 0.05;
+    const next = Math.round(Math.max(0.01, Math.min(12, this.settings.sensitivity + delta)) * 100) / 100;
+    this.setSetting('sensitivity', next);
   }
 
-  shootAtCrosshair() {
-    if (!this.currentMode) return;
-    this.audio.play('shoot');
-    this.playShotAnimation();
+  /* ---------- Drill lifecycle ---------- */
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera({ x: 0, y: 0 }, this.camera.instance);
-    /* Raycast live targets (pool.active), NOT pool.objects — that array is the
-       free stack, so active targets are not in it and shots land on nothing. */
-    const visibleMeshes = Array.from(this.pool.active)
-      .map((target) => target.mesh)
-      .filter((mesh) => mesh.visible && mesh.userData.target);
-    const intersects = raycaster.intersectObjects(visibleMeshes);
-    const hit = intersects.length > 0;
-    this.currentMode.onClick(intersects);
-    this.triggerHitFeedback(hit);
+  startMode(modeName) {
+    const ModeClass = this.modes[modeName];
+    if (!ModeClass) return;
+
+    this.abandonCurrentMode();
+    this.closeSettings({ instant: true });
+    this.overlay.close();
+    this.shards.hideAll();
+    this.missMarks.clear();
+
+    this.currentMode = new ModeClass(this);
+    this.currentModeName = modeName;
+    this.lastModeName = modeName;
+    this.session = { shotLog: [], killTimes: [], difficulty: this.settings.difficulty, startedAt: 0 };
+
+    this.preview.setVisible(false);
+    this.camera.instance.clearViewOffset();
+    this.weapon.setVisible(this.settings.showWeapon);
+    this.weapon.equip();
+    this.camera.reset();
+    this.phase = 'arming';
+    this.setInGameUI({ hud: true, crosshair: true });
+    this.updateHUD();
+    this.requestLock();
   }
 
-  playShotAnimation() {
-    this.weapon.shoot();
-  }
-
-  triggerHitFeedback(hit) {
-    this.hitMarker.classList.add(hit ? 'hit' : 'miss');
-    this.queueUITimer(() => {
-      this.hitMarker.classList.remove('hit');
-      this.hitMarker.classList.remove('miss');
-    }, 160);
-  }
-
-  queueUITimer(fn, delay) {
-    const timerId = setTimeout(() => {
-      this.uiTimers = this.uiTimers.filter((id) => id !== timerId);
-      fn();
-    }, delay);
-    this.uiTimers.push(timerId);
-  }
-
-  clearUITimers() {
-    this.uiTimers.forEach((timerId) => clearTimeout(timerId));
-    this.uiTimers = [];
-  }
-
-  /* Toggles the in-game-only UI (crosshair + HUD) together so menus stay clean */
-  setInGameUI(visible) {
-    this.crosshair.style.display = visible ? 'block' : 'none';
-    const display = visible ? 'block' : 'none';
-    if (this.hud) this.hud.element.style.display = display;
-  }
-
-  showMainMenu(showResume) {
-    const menu = new Menu(document.createElement('div'), this, { showResume });
-    this.overlay.show(menu.element);
-  }
-
-  endCurrentModeAndSaveSession() {
-    if (!this.currentMode) return null;
+  /* Asks for pointer lock; if the browser refuses or is slow, a click prompt appears */
+  requestLock() {
+    this.input.lockEnabled = true;
     try {
-      const summary = this.currentMode.end?.();
-      if (summary) {
-        StatsManager.push({
-          mode: this.currentModeName || this.currentMode.constructor.name,
-          start: this.sessionStart || Date.now(),
-          end: Date.now(),
-          ...summary
-        });
-      }
-      return summary;
+      const request = this.renderer.canvas.requestPointerLock();
+      if (request?.catch) request.catch(() => this.showLockPrompt());
     } catch (error) {
-      console.warn('Mode end failed', error);
-      return null;
+      this.showLockPrompt();
+    }
+    setTimeout(() => {
+      if ((this.phase === 'arming' || this.phase === 'resuming') && !this.input.isLocked) this.showLockPrompt();
+    }, LOCK_PROMPT_DELAY_MS);
+  }
+
+  onPointerLockChange() {
+    const locked = document.pointerLockElement === this.renderer.canvas;
+    if (locked) {
+      this.hideLockPrompt();
+      if (this.phase === 'arming') this.startCountdown();
+      else if (this.phase === 'resuming') this.phase = 'live';
+      return;
+    }
+    if (this.phase === 'live' || this.phase === 'countdown') this.pause();
+  }
+
+  showLockPrompt() {
+    if (this.lockPrompt || !(this.phase === 'arming' || this.phase === 'resuming')) return;
+    this.lockPrompt = createLockPrompt(() => this.requestLock(), { resuming: this.phase === 'resuming' });
+    this.promptLayer.appendChild(this.lockPrompt);
+  }
+
+  hideLockPrompt() {
+    this.lockPrompt?.remove();
+    this.lockPrompt = null;
+  }
+
+  startCountdown() {
+    this.phase = 'countdown';
+    this.countdownStart = performance.now();
+    this.countdownStep = -1;
+    this.countdown = createCountdown();
+    this.promptLayer.appendChild(this.countdown.element);
+  }
+
+  /* Stepped 3-2-1, one tick sound per digit, then targets spawn */
+  updateCountdown(now) {
+    const step = Math.floor((now - this.countdownStart) / COUNTDOWN_STEP_MS);
+    if (step >= 3) return this.beginLive();
+    if (step !== this.countdownStep) {
+      this.countdownStep = step;
+      this.countdown.set(String(3 - step));
+      this.audio.play('countdown');
     }
   }
 
-  /* Called when a mode signals `finished` (session timer expired).
-     Saves stats, tears the session down and shows the results modal. */
-  endSession() {
-    if (!this.currentMode) return;
-    const ModeClass = this.currentMode.constructor;
-    const modeName = this.currentModeName || ModeClass.name;
-    const summary = { name: modeName, ...this.endCurrentModeAndSaveSession() };
-
-    this.isRunning = false;
-    this.input.lockEnabled = false;
-    this.input.unlock();
-    this.setInGameUI(false);
-    this.clearActiveTargets();
-    this.clearUITimers();
-    this.audio.play('complete');
-    this.showSummary(summary, ModeClass, modeName);
+  removeCountdown() {
+    this.countdown?.element.remove();
+    this.countdown = null;
   }
 
-  /* Results screen shown after every completed session */
-  showSummary(summary, ModeClass, modeName) {
-    const modal = document.createElement('div');
-    modal.className = 'glass';
-    modal.style.cssText = 'position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:24px; min-width:320px; text-align:center;';
-    modal.innerHTML = `
-      <h3 class="neon-text">${summary.name} Complete</h3>
-      <div style="text-align:left; margin: 12px 0; line-height:1.7;">
-        <div>Score: <strong>${Math.round(summary.score || 0)}</strong></div>
-        <div>Accuracy: <strong>${(summary.accuracy || 0).toFixed(1)}%</strong> (${summary.hits || 0}/${summary.shots || 0})</div>
-        ${summary.maxCombo !== undefined ? `<div>Best combo: <strong>${summary.maxCombo}</strong></div>` : ''}
-        ${summary.avgReaction !== undefined ? `<div>Avg reaction: <strong>${summary.avgReaction}ms</strong> (best ${summary.bestReaction || '-'}ms)</div>` : ''}
-      </div>
-    `;
+  beginLive() {
+    this.removeCountdown();
+    this.phase = 'live';
+    this.session.startedAt = Date.now();
+    this.currentMode.start();
+    this.audio.play('go');
+  }
 
-    const retry = document.createElement('button');
-    retry.className = 'btn';
-    retry.textContent = 'Retry';
-    retry.onclick = () => {
-      this.audio.play('click');
-      this.startMode(ModeClass, modeName);
-    };
-    const menu = document.createElement('button');
-    menu.className = 'btn';
-    menu.textContent = 'Main Menu';
-    menu.onclick = () => {
-      this.audio.play('click');
-      this.overlay.close();
-      this.showMainMenu(false);
-    };
-    modal.appendChild(retry);
-    modal.appendChild(menu);
+  pause() {
+    if (!['live', 'countdown', 'arming', 'resuming'].includes(this.phase)) return;
+    /* A countdown or an unconfirmed start restarts its countdown on resume */
+    this.pausedFrom = this.phase === 'live' || this.phase === 'resuming' ? 'live' : 'countdown';
+    this.phase = 'paused';
+    this.pausedAt = performance.now();
+    this.removeCountdown();
+    this.hideLockPrompt();
+    this.input.lockEnabled = false;
+    if (this.input.isLocked) this.input.unlock();
+    this.setInGameUI({ hud: true, crosshair: false });
+    this.overlay.show(createPauseScreen(this));
+  }
 
-    this.overlay.show(modal);
+  resume() {
+    if (this.phase !== 'paused' || !this.currentMode) return;
+    this.closeSettings({ instant: true });
+    this.overlay.close();
+    this.phase = this.pausedFrom === 'live' ? 'resuming' : 'arming';
+    this.setInGameUI({ hud: true, crosshair: true });
+    this.requestLock();
+  }
+
+  restart() {
+    const name = this.currentModeName || this.lastModeName;
+    if (name) this.startMode(name);
+  }
+
+  quitToHome() {
+    this.abandonCurrentMode();
+    this.showHome();
+  }
+
+  /* Ends a drill without saving it (quit, restart, switching drills) */
+  abandonCurrentMode() {
+    const mode = this.currentMode;
+    this.phase = 'idle';
+    this.currentMode = null;
+    this.currentModeName = null;
+    if (mode) {
+      try {
+        mode.end?.();
+      } catch (error) {
+        console.warn('Mode end failed', error);
+      }
+    }
+    this.clearActiveTargets();
+    this.removeCountdown();
+    this.hideLockPrompt();
+    this.input.lockEnabled = false;
+    if (this.input.isLocked) this.input.unlock();
+  }
+
+  /* Called when a drill sets `finished` (its clock ran out): save, then show results */
+  endSession() {
+    const modeName = this.currentModeName;
+    const mode = this.currentMode;
+    const session = this.session;
+    this.phase = 'results';
+    this.currentMode = null;
+    this.currentModeName = null;
+
+    let summary = {};
+    try {
+      summary = mode.end?.() || {};
+    } catch (error) {
+      console.warn('Mode end failed', error);
+    }
+
+    const previousBest = bestFor(modeName)?.score ?? null;
+    const killTimes = session.killTimes;
+    const record = {
+      mode: modeName,
+      start: session.startedAt || Date.now(),
+      end: Date.now(),
+      difficulty: session.difficulty,
+      ...summary,
+      ...(killTimes.length && !summary.avgReaction
+        ? { avgKillMs: Math.round(killTimes.reduce((a, b) => a + b, 0) / killTimes.length) }
+        : {})
+    };
+    StatsManager.push(record);
+
+    this.input.lockEnabled = false;
+    if (this.input.isLocked) this.input.unlock();
+    this.setInGameUI({ hud: false, crosshair: false });
+    this.clearActiveTargets();
+    this.audio.play('complete');
+    this.overlay.show(createResultsScreen(this, { ...record, shotLog: session.shotLog, previousBest }));
   }
 
   clearActiveTargets() {
@@ -304,133 +406,108 @@ export class Game {
     }
   }
 
-  startMode(ModeClass, modeName = 'Unknown') {
-    this.endCurrentModeAndSaveSession();
-    this.clearActiveTargets();
-    this.overlay.close();
-    this.clearUITimers();
+  /* ---------- Shooting ---------- */
 
-    this.currentMode = new ModeClass(this);
-    this.currentModeName = modeName;
-    this.currentMode.start();
-    this.sessionStart = Date.now();
-    this.isRunning = true;
-    this.setInGameUI(true);
+  shootAtCrosshair() {
+    const mode = this.currentMode;
+    if (!mode) return;
+    this.audio.play('shoot');
+    this.weapon.shoot();
 
-    /* Fresh session starts with the view centered on the target wall */
-    this.camera.reset();
-    this.input.lockEnabled = true;
+    this.raycaster.setFromCamera(SCREEN_CENTER, this.camera.instance);
+    /* Raycast live targets (pool.active), NOT pool.objects: that array is the
+       free stack. Filtering userData.target keeps popped corpses unhittable. */
+    const liveTargets = Array.from(this.pool.active).filter((t) => t.mesh.visible && t.mesh.userData.target);
+    /* A target spawned this frame has not been rendered yet, so refresh its world matrix */
+    for (const target of liveTargets) target.mesh.updateMatrixWorld();
+    const intersects = this.raycaster.intersectObjects(liveTargets.map((t) => t.mesh), false);
 
-    try {
-      const request = this.renderer.canvas.requestPointerLock();
-      if (request?.catch) request.catch(() => {});
-    } catch (error) {
-      // no-op
+    /* Snapshot before the mode reacts: a killed target is released or recycled in onClick */
+    const struck = intersects[0]?.object.userData.target;
+    const struckPos = struck ? struck.mesh.position.clone() : null;
+    const struckRadius = struck ? struck.mesh.scale.x * 0.3 : 0;
+    const struckAge = struck ? performance.now() - struck.bornAt : 0;
+    const placement = this.measurePlacement(liveTargets);
+
+    const hitsBefore = mode.hits || 0;
+    mode.onClick(intersects);
+    const killed = (mode.hits || 0) > hitsBefore;
+
+    if (placement) this.logShot(placement, killed);
+    if (killed && struck) {
+      struck.spawning = false;
+      this.session.killTimes.push(struckAge);
+      this.hud.flashHit();
+      this.shards.burst(struckPos, struckRadius);
+    } else {
+      const wall = this.raycaster.intersectObjects(this.scene.surfaces, false)[0];
+      if (wall) this.missMarks.place(wall);
     }
   }
 
-  async showModeSelect() {
-    const modal = document.createElement('div');
-    modal.className = 'glass';
-    modal.style.cssText = 'position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); padding:20px;';
-    modal.innerHTML = '<h3 class="neon-text">Select Mode</h3>';
-
-    const modes = await loadSelectableModes();
-    for (const [name, ModeClass] of Object.entries(modes)) {
-      const button = document.createElement('button');
-      button.className = 'btn';
-      button.textContent = name;
-      button.onclick = () => {
-        this.audio.play('click');
-        this.startMode(ModeClass, name);
-      };
-      modal.appendChild(button);
+  /* Where the crosshair sat relative to the closest target, in target radii
+     (x right, y up). Feeds the shot placement map on the results screen. */
+  measurePlacement(targets) {
+    const cam = this.camera.instance;
+    let best = null;
+    for (const target of targets) {
+      const local = target.mesh.position.clone().applyMatrix4(cam.matrixWorldInverse);
+      if (local.z >= 0) continue; // behind the camera
+      const angX = Math.atan2(local.x, -local.z);
+      const angY = Math.atan2(local.y, -local.z);
+      const angRadius = Math.atan((target.mesh.scale.x * 0.3) / local.length());
+      const distance = Math.hypot(angX, angY) / angRadius;
+      if (!best || distance < best.distance) best = { x: -angX / angRadius, y: -angY / angRadius, distance };
     }
-
-    modal.appendChild(this.buildDifficultySettingsSection());
-    this.overlay.show(modal);
+    return best;
   }
 
-  /* What/why/how: Keep difficulty controls in one reusable panel so mode tuning is consistent and persisted. */
-  buildDifficultySettingsSection() {
-    const panel = document.createElement('div');
-    panel.style.marginTop = '12px';
-    panel.innerHTML = `
-      <div style="margin-top:6px">Target size: <input id="targetSize" type="range" min="0.01" max="2" step="0.01" value="${this.settings.targetSize}"> <input id="targetSizeVal" type="number" step="0.01" value="${this.settings.targetSize}" style="width:72px; margin-left:8px"></div>
-      <div>Spawn speed: <input id="spawnSpeed" type="range" min="0" max="5" step="0.01" value="${this.settings.spawnSpeed}"> <input id="spawnSpeedVal" type="number" step="0.01" value="${this.settings.spawnSpeed}" style="width:72px; margin-left:8px"></div>
-      <div>Movement speed: <input id="moveSpeed" type="range" min="0" max="3" step="0.01" value="${this.settings.movementSpeed}"> <input id="moveSpeedVal" type="number" step="0.01" value="${this.settings.movementSpeed}" style="width:72px; margin-left:8px"></div>
-      <div style="font-size:12px; opacity:.8; margin-top:8px;">Quick sensitivity: '[' and ']'</div>
-    `;
-
-    this.bindRangeAndNumber(panel, 'targetSize', 'targetSizeVal', 'targetSize');
-    this.bindRangeAndNumber(panel, 'spawnSpeed', 'spawnSpeedVal', 'spawnSpeed');
-    this.bindRangeAndNumber(panel, 'moveSpeed', 'moveSpeedVal', 'movementSpeed');
-    return panel;
+  logShot(placement, hit) {
+    const log = this.session.shotLog;
+    if (log.length >= SHOT_LOG_LIMIT) log.shift();
+    log.push({ x: placement.x, y: placement.y, hit });
   }
 
-  bindRangeAndNumber(panel, rangeId, numberId, settingKey) {
-    const rangeInput = panel.querySelector(`#${rangeId}`);
-    const numberInput = panel.querySelector(`#${numberId}`);
-    const syncValue = (raw) => {
-      const value = parseFloat(raw);
-      if (Number.isNaN(value)) return;
-      rangeInput.value = value;
-      numberInput.value = value;
-      this.settings[settingKey] = value;
-      Storage.set(`settings.${settingKey}`, value);
-    };
-    rangeInput.addEventListener('input', (event) => syncValue(event.target.value));
-    numberInput.addEventListener('change', (event) => syncValue(event.target.value));
-  }
-
-  pause() {
-    this.isRunning = false;
-    this.input.lockEnabled = false;
-    this.input.unlock();
-    this.setInGameUI(false);
-    this.showMainMenu(true);
-  }
-
-  resume() {
-    if (!this.currentMode) return;
-    this.overlay.close();
-    this.isRunning = true;
-    this.input.lockEnabled = true;
-    this.setInGameUI(true);
-    try {
-      const request = this.renderer.canvas.requestPointerLock();
-      if (request?.catch) request.catch(() => {});
-    } catch (error) {
-      // no-op
+  /* Tracking feedback: whichever target is under the crosshair glows brighter */
+  updateTrackingFocus() {
+    this.raycaster.setFromCamera(SCREEN_CENTER, this.camera.instance);
+    for (const target of this.pool.active) {
+      const onTarget = target.mesh.visible && this.raycaster.intersectObject(target.mesh, false).length > 0;
+      target.setFocus(onTarget);
     }
   }
 
-  restart() {
-    if (!this.currentMode) return;
-    const ModeClass = this.currentMode.constructor;
-    const name = this.currentModeName || ModeClass.name;
-    this.startMode(ModeClass, name);
-  }
+  /* ---------- Frame loop ---------- */
 
   animate(time) {
     requestAnimationFrame((nextTime) => this.animate(nextTime));
 
-    /* Weapon recoil/sway runs every frame, even when the game is paused */
     const dt = Math.min(0.05, (time - this.lastFrameTime) / 1000 || 0);
     this.lastFrameTime = time;
-    this.weapon.update(dt);
+    const now = performance.now();
 
+    this.weapon.update(dt);
+    this.shards.update(dt);
+    this.missMarks.update(dt);
     this.updateFPSCounter(time);
 
-    if (this.isRunning && this.input.isLocked && this.currentMode) {
-      this.updateCameraFromMouse();
-      const deltaMs = Math.min(50, dt * 1000);
-      this.currentMode.update(deltaMs);
+    if (this.phase === 'idle') {
+      this.driftIdleCamera(time / 1000);
+      this.preview.update(dt);
+    }
 
-      /* A mode can declare the session over (e.g. time ran out) */
+    if (this.phase === 'countdown') {
+      this.updateCameraFromMouse();
+      this.updateCountdown(now);
+    } else if (this.phase === 'live' && this.input.isLocked && this.currentMode) {
+      this.updateCameraFromMouse();
+      for (const target of this.pool.active) target.updateSpawn(now);
+      this.currentMode.update(dt * 1000);
+
       if (this.currentMode.finished) {
         this.endSession();
       } else {
+        if (this.currentModeName === 'Tracking') this.updateTrackingFocus();
         this.updateHUD();
       }
     }
@@ -438,12 +515,20 @@ export class Game {
     this.renderer.render(this.scene.scene, this.camera.instance);
   }
 
+  /* Behind the home menu the view looks at the target zone with a slow, small sway */
+  driftIdleCamera(seconds) {
+    const rotation = this.camera.instance.rotation;
+    rotation.y = Math.PI + Math.sin(seconds * 0.11) * 0.012;
+    rotation.x = 0.085 + Math.sin(seconds * 0.07) * 0.008;
+  }
+
   updateFPSCounter(time) {
     this.frameCount += 1;
-    if (time - this.lastTime < 1000) return;
+    if (time - this.lastFpsTime < 1000) return;
     this.fps = this.frameCount;
     this.frameCount = 0;
-    this.lastTime = time;
+    this.lastFpsTime = time;
+    if (this.phase === 'live' || this.phase === 'countdown') this.hud.setFPS(this.fps);
   }
 
   /* Applies accumulated mouse deltas with clamped look angles:
@@ -465,41 +550,141 @@ export class Game {
   }
 
   updateHUD() {
-    const shots = this.currentMode.shots || 0;
-    const hits = this.currentMode.hits || 0;
+    const mode = this.currentMode;
+    if (!mode) return;
+    const shots = mode.shots || 0;
+    const hits = mode.hits || 0;
     this.hud.update({
-      score: this.currentMode.score || 0,
+      score: mode.score || 0,
       accuracy: shots > 0 ? (hits / shots) * 100 : 0,
-      combo: this.currentMode.combo || 0,
-      timeLeft: this.currentMode.timeLeft
+      combo: mode.combo || 0,
+      timeLeft: mode.timeLeft
     });
-    this.hud.setFPS(this.fps);
   }
 
-  applySettings() {
-    this.camera.updateFOV(this.settings.fov);
-    this.applyCrosshair();
-    this.audio.setVolume(this.settings.volume);
+  setInGameUI({ hud, crosshair }) {
+    this.crosshair.style.display = crosshair ? 'block' : 'none';
+    document.body.classList.toggle('in-game', hud);
+    this.hud?.setVisible(hud);
   }
 
-  /* Renders the configured crosshair into the DOM overlay element */
-  applyCrosshair() {
-    this.crosshair.innerHTML = buildCrosshairSVG(mergeCrosshairConfig(this.settings.crosshair));
+  /* ---------- Screens ---------- */
+
+  showHome({ animate = false } = {}) {
+    if (this.phase !== 'idle') this.abandonCurrentMode();
+    this.closeSettings({ instant: true });
+    this.phase = 'idle';
+    this.setInGameUI({ hud: false, crosshair: false });
+    this.clearActiveTargets();
+    this.shards.hideAll();
+    this.missMarks.clear();
+    this.weapon.setVisible(false);
+    this.home = new HomeScreen(this, { animate });
+    this.overlay.show(this.home.element);
+    this.preview.setVisible(true);
+    this.preview.setMode(this.home.selected);
+    requestAnimationFrame(() => this.applyHomeViewOffset());
   }
 
-  /* Any modal close while idle must land back on the main menu, never an empty screen */
-  closeOverlayToMenu() {
-    this.overlay.close();
-    this.showMainMenu(!!this.currentMode);
+  /* Home rail covers the left of the screen: shift the 3D view so the ghost run
+     is centred in the free stage area above the drill card */
+  applyHomeViewOffset() {
+    if (!this.home?.element.isConnected) return;
+    const { x, y } = this.home.stageOffset();
+    const w = window.innerWidth;
+    const hgt = window.innerHeight;
+    if (x || y) this.camera.instance.setViewOffset(w, hgt, -x, y, w, hgt);
+    else this.camera.instance.clearViewOffset();
   }
 
-  showSettings() {
-    const settingsModal = new Settings(document.createElement('div'), this);
-    this.overlay.show(settingsModal.el);
+  onHomeSelection(modeName) {
+    this.preview.setMode(modeName);
+    requestAnimationFrame(() => this.applyHomeViewOffset());
   }
 
   showStats() {
-    const statsModal = new StatsUI(document.createElement('div'), this);
-    this.overlay.show(statsModal.el);
+    this.closeSettings({ instant: true });
+    const page = new StatsPage(this);
+    this.overlay.show(page.el, page);
   }
+
+  /* Settings drawer is modal: the rest of the UI goes inert so Tab stays inside,
+     and focus returns to whatever opened it when it closes */
+  openSettings(tab) {
+    if (this.settingsDrawer) return;
+    this.settingsReturnFocus = document.activeElement;
+    this.settingsDrawer = new SettingsDrawer(this, { tab });
+    this.drawerLayer.appendChild(this.settingsDrawer.element);
+    this.overlayLayer.inert = true;
+    this.persistentLayer.inert = true;
+    this.settingsDrawer.open();
+  }
+
+  closeSettings({ instant = false } = {}) {
+    const drawer = this.settingsDrawer;
+    if (!drawer) return;
+    this.settingsDrawer = null;
+    if (instant) drawer.element.remove();
+    else drawer.close();
+    this.overlayLayer.inert = false;
+    this.persistentLayer.inert = false;
+    /* Home shows sensitivity and records; rebuild it so it reflects new settings */
+    if (this.phase === 'idle' && this.overlay.is('home')) {
+      this.home = new HomeScreen(this);
+      this.overlay.show(this.home.element);
+      this.preview.setMode(this.home.selected);
+      requestAnimationFrame(() => this.applyHomeViewOffset());
+    }
+    const returnTo = this.settingsReturnFocus;
+    this.settingsReturnFocus = null;
+    if (!instant && returnTo?.isConnected) returnTo.focus({ preventScroll: true });
+    else if (!instant) this.overlay.activeOverlay?.querySelector('[aria-pressed="true"], .btn-primary')?.focus({ preventScroll: true });
+  }
+
+  /* ---------- Settings ---------- */
+
+  /* Single write path for every setting: memory, storage, then live effect */
+  setSetting(key, value) {
+    this.settings[key] = value;
+    const storageKey = key === 'volume' || key === 'hitSound' ? `audio.${key}` : `settings.${key}`;
+    Storage.set(storageKey, value);
+    this.applySettings();
+  }
+
+  setDifficulty(id) {
+    this.setSetting('difficulty', id);
+    const preset = DIFFICULTY_PRESETS[id];
+    if (!preset) return;
+    for (const key of ['targetSize', 'spawnSpeed', 'movementSpeed']) this.setSetting(key, preset[key]);
+  }
+
+  updateCrosshair(patch) {
+    const next = { ...mergeCrosshairConfig(this.settings.crosshair), ...patch };
+    this.setSetting('crosshair', mergeCrosshairConfig(next));
+  }
+
+  applySettings() {
+    const s = this.settings;
+    this.camera.updateFOV(s.fov);
+    this.crosshair.innerHTML = buildCrosshairSVG(mergeCrosshairConfig(s.crosshair));
+    this.audio.setVolume(s.volume);
+    this.audio.setHitSound(s.hitSound);
+    this.weapon.setVisible(s.showWeapon && this.phase !== 'idle');
+    this.hud?.setMetaVisible(s.showMeta);
+
+    const color = targetColorHex(s.targetColor);
+    setTargetColor(color);
+    this.preview.setColor(color);
+    this.shards.setColor(color);
+
+    const quality = getQuality(s.graphics);
+    if (this.renderer.quality !== quality) this.renderer.applyQuality(quality, this.scene.scene, this.camera.instance);
+    this.shards.enabled = quality.effects;
+    this.missMarks.enabled = quality.effects;
+  }
+}
+
+/* Phones and tablets cannot pointer-lock or aim with a mouse */
+function isTouchOnlyDevice() {
+  return window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(any-pointer: fine)').matches;
 }

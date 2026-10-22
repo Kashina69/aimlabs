@@ -1,0 +1,142 @@
+/* Reset, page shell, focus and reduced-motion behaviour shared by every screen */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4 {
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+::selection {
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* App layers */
+#container {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-scene);
+}
+
+#ui-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-hud);
+  /* The UI spans the screen but must let clicks reach the canvas;
+     interactive surfaces opt back in with .interactive */
+  pointer-events: none;
+}
+
+#ui-root > * {
+  position: absolute;
+  inset: 0;
+}
+
+/* Every screen inside a layer fills the viewport */
+#ui-overlay > *,
+#ui-drawer > *,
+#ui-prompt > *,
+#ui-persistent > .hud {
+  position: absolute;
+  inset: 0;
+}
+
+#ui-overlay { z-index: var(--z-overlay); }
+#ui-drawer { z-index: var(--z-drawer); }
+#ui-prompt { z-index: var(--z-prompt); }
+
+.interactive {
+  pointer-events: auto;
+}
+
+/* Fine film grain over menus only (never during play) */
+.grain::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Shared entrance: short rise + fade, used for panels and staggered rows */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-property: opacity, color, background-color, border-color !important;
+  }
+}
