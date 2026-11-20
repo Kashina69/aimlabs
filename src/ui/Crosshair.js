@@ -4,12 +4,12 @@
 
 export const CROSSHAIR_DEFAULTS = {
   style: 'cross',     // cross | x | t | circle | square
-  size: 8,            // arm length (px at 1:1 preview scale)
+  size: 6,            // arm length (px at 1:1 preview scale)
   thickness: 2,       // arm stroke width
   gap: 3,             // distance between center and arm start
   dot: false,         // center dot toggle
   dotSize: 4,         // center dot diameter
-  color: '#00ffff',
+  color: '#ffffff',
   outline: true,      // dark border behind the strokes for visibility
   rotation: 0,        // degrees, 0-360
   opacity: 1

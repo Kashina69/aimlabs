@@ -1,5 +1,8 @@
 import * as THREE from '../three-shim.js';
 import { TargetMotion } from '../core/TargetMotion.js';
+import { tickSessionClock } from './sessionClock.js';
+
+const SESSION_SECONDS = 60;
 
 /* Click-drill on a moving target: one strafing target, click it with the
    crosshair; it respawns after every hit. Motion comes from TargetMotion so
@@ -11,6 +14,7 @@ export class ClickTrackMode {
     this.motion = null;
     this.score = 0; this.hits = 0; this.shots = 0; this.combo = 0;
     this.maxCombo = 0;
+    this.timeLeft = SESSION_SECONDS;
   }
 
   start() {
@@ -30,6 +34,7 @@ export class ClickTrackMode {
   }
 
   update(deltaMs = 16) {
+    if (tickSessionClock(this, deltaMs)) return;
     if (!this.target || !this.target.active) return;
     const dt = Math.min(0.05, deltaMs / 1000);
     this.motion.update(this.target.mesh.position, dt, this.game.settings.movementSpeed || 1);
@@ -65,7 +70,10 @@ export class ClickTrackMode {
     return {
       score: this.score,
       accuracy: this.shots ? (this.hits / this.shots) * 100 : 0,
-      maxCombo: this.maxCombo
+      hits: this.hits,
+      shots: this.shots,
+      maxCombo: this.maxCombo,
+      duration: SESSION_SECONDS * 1000
     };
   }
 }

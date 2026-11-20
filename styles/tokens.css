@@ -1,0 +1,93 @@
+/* Design tokens: the single source for colour, type, space, radius, layers and motion.
+   Palette is OKLCH: cool graphite neutrals (hue 250) and one acid-lime signal accent
+   that means exactly one thing: "the thing you shoot / the thing you press". */
+
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Neutrals */
+  --bg: oklch(0.16 0.012 250);
+  --surface-1: oklch(0.2 0.012 250);
+  --surface-2: oklch(0.24 0.012 250);
+  --surface-3: oklch(0.29 0.012 250);
+  --line: oklch(0.32 0.012 250);
+  --line-soft: oklch(0.26 0.012 250);
+  --ink: oklch(0.96 0.005 250);
+  --ink-2: oklch(0.78 0.01 250);
+  --ink-3: oklch(0.62 0.012 250);
+
+  /* Panels float over the live 3D range, so they carry a little transparency */
+  --panel: oklch(0.19 0.012 250 / 0.94);
+  --scrim: oklch(0.12 0.012 250 / 0.72);
+  --scrim-strong: oklch(0.12 0.012 250 / 0.9);
+
+  /* Accent and states */
+  --signal: oklch(0.9 0.2 122);
+  --signal-hover: oklch(0.94 0.18 122);
+  --signal-ink: oklch(0.2 0.05 122);
+  --signal-soft: oklch(0.9 0.2 122 / 0.14);
+  --bad: oklch(0.68 0.17 25);
+
+  /* Shadows are tinted toward the neutral hue, never pure black */
+  --shadow-panel: 0 24px 48px -24px oklch(0.08 0.02 250 / 0.8);
+  --text-shadow-hud: 0 1px 2px oklch(0.08 0.02 250 / 0.9), 0 0 12px oklch(0.08 0.02 250 / 0.6);
+
+  /* Type */
+  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+  --text-caption: 0.75rem;
+  --text-ui: 0.875rem;
+  --text-body: 1rem;
+  --text-h3: 1.25rem;
+  --text-h2: 1.75rem;
+  --text-display: clamp(2.25rem, 4vw, 3rem);
+  --text-score: clamp(3.5rem, 7vw, 5rem);
+
+  /* Space (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --inset: clamp(16px, 4vw, 56px);
+
+  /* Radius rule: controls 8, panels 14, pills only for segmented toggles */
+  --radius-control: 8px;
+  --radius-panel: 14px;
+  --radius-pill: 999px;
+
+  /* Layers */
+  --z-scene: 0;
+  --z-hud: 10;
+  --z-overlay: 20;
+  --z-drawer: 30;
+  --z-prompt: 40;
+  --z-crosshair: 50;
+
+  /* Motion (curves from the animate / emil-design-eng skills) */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-press: 120ms;
+  --dur-ui: 200ms;
+  --dur-panel: 320ms;
+}

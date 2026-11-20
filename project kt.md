@@ -1,60 +1,102 @@
 **Project Summary**
 - Minimal browser Aim Trainer (Three.js + vanilla JS), tuned for simple flow, low overhead, and easy maintenance.
+- Visual design (2026-10 redesign, branch `design-updates`): dark graphite range, ONE acid-lime accent (`--signal`) that means "thing you shoot / thing you press". Full rationale: `docs/REDESIGN_PLAN.md` (v1) and `docs/REDESIGN_PLAN_V2.md` (gun, range, launcher menu).
 
 **Run**
 ```bash
-cd learning/project/aimlabs
-python3 -m http.server 8001
+python -m http.server 8001
 # open http://localhost:8001
 ```
 
 **Architecture (current)**
 - `main.js` -> `Game.init()`
-- `Game` owns core systems: renderer, scene, input, audio, pool, mode lifecycle, HUD, overlays.
-- `OverlayManager` owns exactly one modal/overlay at a time (menu, settings, stats, mode picker).
-- `ModeRegistry` lazy-loads selectable modes so mode import failures do not break the menu.
+- `Game` owns core systems: renderer, scene, input, audio, pool, fx, drill lifecycle (phase machine), HUD, screens, settings.
+- `OverlayManager` owns exactly one full-screen screen at a time (home, pause, results, stats). `show(el, owner)` calls `owner.destroy()` when replaced.
+- `ModeRegistry` lazy-loads selectable modes so mode import failures do not break the menu. `Game.modes` is the loaded map, keyed `Static | Flick | Click Track | Hold Track | Reaction`.
+- `src/modes/catalog.js`: display titles/descriptions/diagrams + difficulty presets. Keys stay the stored session `mode` names (Static displays as "Gridshot"), so renaming a title never breaks stats.
 
-**Important Code Flow**
-1. `Game.init()` binds global events, creates HUD on persistent UI layer (initially hidden), shows main menu.
-2. `showModeSelect()` renders mode buttons + difficulty controls (target size/spawn speed/move speed).
-3. `startMode()` safely ends old mode, saves session stats, clears pooled targets, resets camera facing, starts new mode.
-4. `animate()` computes dt -> weapon recoil/sway update -> FPS -> camera look -> mode update -> HUD update -> renderer draw.
-5. `shootAtCrosshair()` raycasts ACTIVE pooled targets and routes hit/miss to current mode.
-   CRITICAL FIX: raycast over `pool.active` (always re-derive), never `pool.objects` — that array is the free stack, so active targets are not in it. Filtering alive `mesh.userData.target` keeps killed pop-corpses unhittable.
-6. CRITICAL FIX (Flick blink): NEVER schedule setTimeout lifetimes on pooled targets — the pool hands the SAME instance to the next target, and a stale timer later fires `if (t.active) release` against the NEW target (the "ball appears 0.1s, vanishes, respawns" cycle after ~2 shots). Target lifetimes must be timestamp-based: `spawnedAt` + `lifeMs` reaped in the mode's `update()` (StaticMode pattern), and instant kill on hit. FlickMode was rewritten this way.
+**Important code flow**
+1. `Game.init()` binds global events, creates the HUD, loads selectable modes through `ModeRegistry` and shows the home screen.
+2. `startMode()` abandons the old drill (no save), clears pooled targets/FX, resets the camera, sets phase `arming` and requests pointer lock.
+3. `animate()`: weapon/FX update -> FPS -> (countdown | live) camera look -> mode update -> HUD -> render.
+4. `shootAtCrosshair()` raycasts ACTIVE pooled targets and routes hit/miss to the current mode.
+   CRITICAL: raycast over `pool.active` (always re-derive), never `pool.objects` — that array is the free stack, so active targets are not in it. Filtering alive `mesh.userData.target` keeps killed pop-corpses unhittable.
+5. CRITICAL (Flick blink): NEVER schedule setTimeout lifetimes on pooled targets — the pool hands the SAME instance to the next target, and a stale timer later fires `if (t.active) release` against the NEW target (the "ball appears 0.1s, vanishes, respawns" cycle). Target lifetimes are timestamp-based: `spawnedAt` + `lifeMs` reaped in the mode's `update()`, with instant kill on hit.
+
+**Styling system (no framework, no inline cssText)**
+- `styles/tokens.css`: ALL colours (OKLCH), type scale, spacing, radius, z-index layers, motion curves. Change design here first.
+- `styles/base.css` (reset, layers, focus, reduced motion, shared `rise` keyframes), `components.css` (btn, kbd, field, slider, switch, segmented, tabs, swatch, badge, panel, hold-to-confirm), then one file per screen: `home.css`, `game.css` (HUD/crosshair/countdown/lock prompt/pause), `results.css`, `settings.css`, `stats.css`.
+- Fonts are SELF-HOSTED in `assets/fonts` (Geist + Geist Mono, OFL). CSP is `default-src 'self'`, so Google Fonts/CDNs would be blocked. Changing numbers use `.num` (Geist Mono + tabular-nums).
+- `src/core/palette.js` mirrors the tokens as hex for Three.js materials + target colour presets. Keep in sync with tokens.css.
+- DOM is built with `h()` from `src/ui/dom.js` (text children are text nodes, never HTML). Also `fmt` (int/pct/ms/clock/date), `token()` (read CSS var for canvas), `prepareCanvas()` (HiDPI), `syncSliderFill()`.
+- Motion rules: transform/opacity only, `--ease-out` / `--ease-drawer` curves, <= 320ms. Pause, Esc, restart and HUD numbers NEVER animate (used constantly). Delight budget is only on results (score ticker, staggered stats). Reduced motion handled globally in base.css.
+
+**Drill lifecycle: `Game.phase`**
+- `idle` home/stats -> `startMode(key)` -> `arming` (pointer lock requested; `#lock-prompt` "Click to start" shows after 250ms if not locked) -> lock gained -> `countdown` (3-2-1, 400ms steps, targets not spawned, camera can move) -> `beginLive()` calls `mode.start()` -> `live`.
+- Lock lost / Esc / tab hidden while live|countdown|arming|resuming -> `pause()` -> `paused` (pause sheet). `resume()` -> `resuming` (live drill) or `arming` (countdown restarts) -> lock -> back to live.
+- `mode.finished` -> `endSession()`: saves session (with `difficulty`, `avgKillMs`), computes `previousBest` BEFORE saving, shows results with the in-memory `shotLog`. `currentMode` is cleared, `lastModeName` is kept for Retry/R.
+- `abandonCurrentMode()` ends a drill WITHOUT saving (quit, restart, switching drill). It sets phase idle BEFORE unlocking so the lock-loss handler does not pause.
+- Esc: settings open -> close; live/countdown/arming/resuming -> pause; paused -> resume (ignores the echo within 300ms of pausing, Chrome can send Esc as both lock exit and keydown); results/stats -> home; home -> open settings.
+- Keys: `R` restart (any non-idle phase), `[ ]` sens, `Enter` start on home, `↑ ↓` choose drill on home.
+- `Input.lockEnabled` gates pointer lock: only true while a drill is arming/running.
+
+**Screens (src/ui)**
+- `screens/Home.js` `HomeScreen` (launcher): left **rail** (brand, drill rows with diagram tile + best + number key, Loadout card showing crosshair/sens/cm360/FOV that opens Settings > Controls, nudge if sens never set, Stats/Settings, total runs/time) and right **stage** with the drill card (title, description, facts, Best/Last/Runs/Accuracy + sparkline, difficulty, Start). Below 980px it becomes one column ordered brand, drills, card, loadout, links (`.rail { display: contents }` + `order`).
+- Ghost run: `src/fx/MenuPreview.js` replays the selected drill in the 3D range behind the stage (own 4 meshes, uses Shards for pops, never touches the pool). `Game.applyHomeViewOffset()` uses `camera.setViewOffset` with `home.stageOffset()` so the target zone is centred in the stage; `startMode` calls `clearViewOffset()`. Weapon hidden on home.
+- Home keys (via `Game.handleKeydown`): `1-4` pick drill, `↑ ↓`, `Enter` start, `S` stats, `,` settings.
+- Settings drawer is modal: `openSettings(tab)` sets `inert` on overlay + HUD layers, focuses the active tab, and focus returns to the opener on close.
+- `HUD.js`: top-center score / timer / accuracy, streak (>= 5), bottom-right fps + sens (toggle "Show FPS and sensitivity"), `.hit-ticks` kill confirmation around crosshair. Writes text only when it changes.
+- `screens/Pause.js`, `screens/Results.js` (score ticker, record line, stat grid, shot placement map, recent-runs trend), `screens/Prompts.js` (lock prompt, countdown, touch-device gate).
+- `Settings.js` `SettingsDrawer`: right slide-over in `#ui-drawer` (screen underneath stays). Tabs Controls (sens + cm/360 readout using DPI, FOV, invert Y), Crosshair (presets, builder, base64 share code run through the sanitizer), Targets (colour), Video (Low/Medium/High, show weapon, show meta), Audio (volume, hit sound tick/pop/off).
+- `Stats.js` `StatsPage`: per-drill tabs, records, trend chart with hover readout, recent runs table, hold-to-clear (1.2s). Empty state has a Play button.
+- `charts.js`: sparkline, trend, shot placement map + `describeMisses()` text.
+- Layers in `#ui-root` (pointer-events none; screens opt in with `.interactive`): `#ui-persistent` (HUD, ticks) < `#ui-overlay` < `#ui-drawer` < `#ui-prompt`. Crosshair is `#crosshair` above all.
+
+**Settings data**
+- All writes go through `Game.setSetting(key, value)` -> memory, Storage (`settings.<key>`, except `audio.volume` / `audio.hitSound`), then `applySettings()`.
+- Keys: sensitivity, dpi, fov (HORIZONTAL degrees, default 103; Camera converts to vertical by aspect), invertY, crosshair, volume, hitSound, graphics (low|medium|high), showWeapon, showMeta, targetColor (preset id), difficulty (easy|normal|hard|custom), targetSize, spawnSpeed, movementSpeed.
+- `setDifficulty(id)` writes the preset's targetSize/spawnSpeed/movementSpeed; `custom` keeps current values.
+- `game` selects the sensitivity profile (`src/ui/GameProfiles.js`); `sensitivity` is stored in that game's own scale.
 
 **Camera Look Limits (intentional design)**
-- Targets always spawn at +Z in front of a back wall (z 5..13, x ±5, y 0.7..4.5). Keep new modes inside this range.
-- `Camera` uses YXZ rotation order; `updateCameraFromMouse()` clamps through `Camera.clampRotation()`:
-  - Yaw: 180 degrees total facing the target wall (90 deg each side of +Z).
-  - Pitch: ±82 degrees (~164 total) so you can never stare straight at floor or ceiling.
-- `startMode()` calls `camera.reset()` so every session begins center-facing the target wall.
+- Targets always spawn at +Z in front of a back wall (z 5..13, x ±5, y 0.7..4.5). Keep new modes inside this range (the back wall has corner brackets marking it).
+- `Camera` uses YXZ rotation order; `updateCameraFromMouse()` clamps through `Camera.clampRotation()`: yaw 180° total facing the wall, pitch ±82°.
+- `startMode()` calls `camera.reset()`. Facing +Z means world -X is screen-right.
 - Mouse deltas ACCUMULATE in `Input.mouse` (do not overwrite them; game clears them after applying).
-- invertY only flips pitch axis. Default (non-inverted) = moving mouse down looks down.
 
 **3D Environment (src/core/Scene.js)**
-- Enclosed room: floor, two side walls, back wall at z=14.5, CEILING at y=9 with warm emissive light panels + soft point glows.
-- Back wall is now a PROPER visible wall: lighter material (0x323c4c) + base emissive lift, plane ROTATED π so its lit face points at the player (it used to face away and render as a black plane), skirting board at the floor line, faint vertical panel seams, warm glow SpotLight + cyan PointLight from buildAccents. Old neon framing strips are gone — don't reintroduce floating accent lines in front of the wall.
-- Renderer uses PHYSICAL light units (three r155+ decay): point/spotlights need candela-scale intensities (~50-130 at these distances; legacy values like 0.25 are invisible). Fog matches bg color 0x10151d.
+- Closed graphite room (all 4 walls, floor, ceiling) with canvas-drawn panel-seam textures (no image files), baseboards, two housed ceiling light strips at x ±7.5 (kept off top-center so they never sit behind the HUD), fog = `--bg`.
+- Back wall is a PROPER visible wall: `addSurface` plane ROTATED π so its lit face points at the player (it used to face away and render black), then tinted lighter (0x323c4c) with a small emissive lift so it terminates the range instead of blending in. A skirting board pins it to the floor.
+- Fake AO: `buildAmbientOcclusion()` lays gradient planes (dark edge = texture top) along every seam; `buildFloorMarkers()` 5 m / 10 m lines + labels; `buildSignage()` "AIMLABS / RANGE 01" on the left wall (+x is screen-left when facing the wall).
+- `buildAccents()` adds a cyan PointLight wash + warm SpotLight on the back wall.
+- In-game vignette: `body.in-game #container::after` (toggled by `setInGameUI`).
+- `scene.surfaces` = room meshes, used for miss-mark raycasts.
+- Renderer uses PHYSICAL light units (three r155+ decay): point/spotlights need candela-scale intensities (~40-130 at these distances; legacy values like 0.25 are invisible). Hemisphere 2.4, key 1.6, wash point 40, accents 55/130.
 - If you widen target spawn ranges, keep them INSIDE the room or targets spawn outside walls.
 
-**Weapon Viewmodel (src/core/Weapon.js)**
-- Pistol + two-handed stance built from boxes/cylinders, attached to the camera (camera must be added to the scene for it to render — done in Game constructor).
-- `weapon.shoot()` drives recoil kick + muzzle flash (point light + additive plane); `weapon.sway(dx,dy)` feeds raw mouse movement.
-- Has its own small fill light so gunmetal stays readable in the dark room.
-- The old CSS gun/muzzle DOM elements were removed; do not recreate them.
+**Targets (src/core/Target.js)**
+- Shared sphere geometry, per-target material from `createTargetMaterial()`: dim albedo (0.28 x colour) for shading, emissive carries the hue, fresnel rim via `onBeforeCompile`, `toneMapped: false` so the colour stays pure. Shared program via `customProgramCacheKey`.
+- `setTargetColor()` sets the colour new spawns use. Spawn settle 80%->100% over 90ms (`updateSpawn`, run by Game before `mode.update`). `setFocus()` brightens a target; `HoldTrackMode` drives emissive directly while held.
+- `Game.shootAtCrosshair` refreshes live target matrices before raycasting (a target spawned this frame has a stale matrixWorld otherwise).
 
-**UI/State Model**
-- `#ui-root` has two layers:
-  - `persistentLayer`: hit marker, HUD (both toggled by `Game.setInGameUI`).
-  - `overlayLayer`: menu/settings/stats/mode picker.
-- `#ui-root` is `pointer-events:none` — critical: it previously swallowed ALL canvas clicks. Overlay popups re-enable pointer events themselves (`.glass` inside `#ui-overlay`).
-- HUD + crosshair hide while any menu is open (`setInGameUI`); DO NOT toggle them individually.
-- DO NOT wipe `uiRoot.innerHTML` during flow changes (past bug); toggle state instead.
-- ESC behavior is now the full state machine described in "Session lifecycle".
+**FX (src/fx)**
+- `Shards`: one InstancedMesh (96 shards, 12 per kill) + 4 pooled rings. `MissMarks`: 24 pooled rings placed on the wall where a miss landed. Both disabled on Low quality.
+- Kill detection is mode-agnostic: Game compares `mode.hits` before/after `onClick`.
+- Shot placement: `measurePlacement()` finds the closest live target angularly and logs crosshair offset in target radii (x right, y up). In-memory only (max 400), NOT saved to localStorage.
+
+**Quality (src/core/Quality.js + Renderer)**
+- Low: pixel ratio 1, no fx. Medium (default): pixel ratio <= 1.5, fx on. High: <= 2, soft shadows, bloom via vendored r159 `src/vendor/addons/postprocessing` (EffectComposer/RenderPass/UnrealBloomPass/OutputPass; imports rewritten to `three-shim.js`).
+- Toggling shadows marks all materials `needsUpdate`.
+
+**Weapon Viewmodel (src/core/Weapon.js + src/core/weapon/)**
+- `weapon/PistolModel.js`: real-scale polymer pistol from bevelled side-profile extrusions (`extrudeProfile`, (u,v) = forward/up), trigger guard with a hole, serrations, ejection port, sights with lime fibre dot. Returns `{ root, slide, muzzle, port }`.
+- No hands or arms: several attempts (procedural, WebXR rigged hands, MakeHuman FPS arms) were rejected by the user as looking unnatural and removed. The pistol is shown alone, bottom-right, about 60% on screen with the grip and rear cut off (`REST` / `REST_ROT` in Weapon.js).
+- The gun is NOT in the range scene: `Weapon` owns `scene` + `camera` (fixed 54° vertical FOV), registered with `Renderer.setOverlay()` and drawn after the range with depth cleared (also a second RenderPass in the bloom composer). It never clips walls or stretches with player FOV. Reflections: RoomEnvironment PMREM on the gun scene only (`initEnvironment(renderer)`).
+- Motion: recoil kick, slide blowback, mouse-lag sway, breathing, `equip()` raise (called in `startMode`), star muzzle flash, 6 pooled brass shells, `attachRoomLight(worldCamera)` flashes a light in the range per shot.
+- Rest pose constants `REST` / `REST_ROT` at the top of Weapon.js. Vendored r159 add-ons used: `geometries/RoundedBoxGeometry.js`, `environments/RoomEnvironment.js`.
 
 **Modes**
-- Implemented/selectable: `Static`, `Flick`, `Click Track` (moved target, click it — smooth TargetMotion), `Hold Track` (hold LMB on drifting target, score = hold seconds), `Reaction`. (Old `TrackingMode.js` was replaced by `ClickTrackMode.js` both renamed /rewritten.)
+- Implemented/selectable: `Static`, `Flick`, `Click Track` (moved target, click it — smooth TargetMotion), `Hold Track` (hold LMB on drifting target, score = hold seconds), `Reaction`. (Old `TrackingMode.js` was replaced by `ClickTrackMode.js`/`HoldTrackMode.js`.)
 - `Static` (gridshot drill): 4 concurrent targets, each fades in (~220ms), holds, fades out (~700ms tail). Hit -> INSTANT pop: target leaves the live set same frame, a white scale-up pop-flash plays ~110ms (cosmetic corpse in `mode.corpses` only), replacement spawns immediately. Session is a 60s countdown (`mode.timeLeft` -> HUD "Time" row); on 0 runs `endSession`.
 - `Flick`: single target with timestamped short lifetime (max(400, 1200 - spawnSpeed*200) ms), repawns on timeout or hit.
 - `Click Track`: one strafing target, click it; +150 × combo per hit, respawn after hit. Movement via `TargetMotion` (see below) so speed changes are gradual; speed scales with the `movementSpeed` difficulty setting.
@@ -71,24 +113,17 @@ python3 -m http.server 8001
 - Quick keys `[` / `]` adjust within the profile's min/max clamp. HUD shows e.g. `Sen: MR 6.67`.
 - Free-cursor mode: middle click during a session exits pointer lock (normal cursor, crosshair hidden, banner hint) and freezes gameplay (updates require `input.isLocked`); clicking the canvas or middle-clicking again re-locks and resumes. `pointerlockchange` auto-pause is skipped while `input.freeCursor`; all lifecycle resets (start/pause/resume/end) clear the flag to avoid the locked-cursor dead-end trap.
 - Fullscreen: `toggleFullscreen()` on Game, driven by the persistent top-right corner button `#fullscreen-btn` (usable in menus + free-cursor mode; pointer lock routes locked-session clicks to the canvas). Label syncs on `fullscreenchange` (`syncFullscreenLabel`).
+- Session clock: `sessionClock.js` `tickSessionClock(mode, deltaMs)` counts `timeLeft` down and sets `finished`; `Game.animate` then calls `endSession()`. Static/Flick/Click Track 60s, Hold Track 45s, Reaction 30s.
 
-**Session lifecycle (new)**
-- A mode may set `this.finished = true`; `animate()` then calls `Game.endSession()`:
-  saves stats, clears targets/UI timers, unlocks pointer, shows a results modal (score/accuracy/combo/avg reaction + Retry + Main Menu).
-- `Game.closeOverlayToMenu()` must be used by every modal close path (Settings/Stats buttons, Escape) so the user ALWAYS lands on a menu, never an empty screen.
-- Escape state machine (`handleGlobalKeydown`):
-  - pause menu open + active session -> resume
-  - other modal open -> close, return to menu if idle
-  - running -> pause
-  - idle -> open settings
-- `Input.lockEnabled` gates pointer lock: pointer can only lock while a session runs (prevents locked-cursor-dead-menu trap).
-- Losing pointer lock mid-session auto-pauses (browser often swallows the Esc keydown).
+**Audio (src/audio/AudioManager.js)**
+- Synthesised WebAudio with envelopes (no files, no 404s). Sounds: shoot, hit-tick, hit-pop, miss, click, countdown, go, complete, best. Optional samples: list them in `SAMPLE_URLS`.
+- Master gain node; context resumes on first play.
 
 **Stats**
-- Sessions are saved in `localStorage` via `StatsManager` key `aimlabs.sessions` (cap 500). `StatsManager.clear()` wipes them.
-- Stats modal: per-mode filter `<select>` ("All modes" + every stored mode), rows/chart filtered by it, two-step "Clear stats" confirm button, and an "Aim Report" shortcut.
+- Sessions are saved in `localStorage` via `StatsManager` key `aimlabs.sessions` (cap 500). `StatsManager.clear()` wipes them; `src/utils/records.js` = read helpers (runsFor, bestFor, lastFor, scoreHistory, summarize).
+- Stats screen: per-drill tabs, records row, score trend chart with hover readout, recent-runs table, an "Aim report" button and a hold-to-clear button.
 - Sessions store mode-specific detail: Static/Flick/ClickTrack score+accuracy+maxCombo; Reaction adds avgReaction/bestReaction/reactionSpread/reactionCount; Hold Track adds bestStreak + accuracy time-based (hits = seconds on target).
-- **Aim Report (`src/ui/AimReport.js` + `src/utils/AimProfile.js`)**: adds an "Aim Report" menu button (also in Stats modal). `computeAimProfile()` reads all stored sessions → 6 axes (Precision, Reaction, Tracking, Flicking, Consistency, Control) scored 0-100 with status chips, canvas HEXAGON radar (rings at 25/50/75/100, skill polygon + labels), overall + balance scores, "Practice plan" (weakest axes with drills/targets, unplayed-mode hints, inconsistency notes typed like typing-master), and a per-mode recent trend table (▲/▼ vs previous session). Missing-data axes show "Unplayed" and score 0 (polygon uses a tiny 2% floor so unplayed axes read as holes). Reaction axis calibrations: avg reaction (450-avg)/3 bands; tracking = 60% on-target% + 40% bestStreak/6s; consistency = 100 − CV×170 across 3+ sessions of the same mode.
+- **Aim Report (`src/ui/AimReport.js` + `src/utils/AimProfile.js`)**: reachable from the home rail and the Stats screen. `computeAimProfile()` reads all stored sessions → 6 axes (Precision, Reaction, Tracking, Flicking, Consistency, Control) scored 0-100 with status chips, canvas HEXAGON radar (rings at 25/50/75/100, skill polygon + labels), overall + balance scores, "Practice plan" (weakest axes with drills/targets, unplayed-mode hints, inconsistency notes typed like typing-master), and a per-mode recent trend table (▲/▼ vs previous session). Missing-data axes show "Unplayed" and score 0 (polygon uses a tiny 2% floor so unplayed axes read as holes). Reaction axis calibrations: avg reaction (450-avg)/3 bands; tracking = 60% on-target% + 40% bestStreak/6s; consistency = 100 − CV×170 across 3+ sessions of the same mode.
 
 **Performance + Leak Prevention**
 - Target object pooling is used (`Pool.acquire/release`).
@@ -108,27 +143,23 @@ python3 -m http.server 8001
 **Crosshair Builder (src/ui/Crosshair.js)**
 - Crosshair config: `{style cross|x|t|circle|square, size, thickness, gap, dot, dotSize, color, outline, rotation, opacity}` stored under `settings.crosshair`; merge with `CROSSHAIR_DEFAULTS` so old saves render fine.
 - `buildCrosshairSVG(cfg)` renders inline SVG (100x100 viewBox, rotation via transform). `Game.applyCrosshair()` renders into `#crosshair` element; call it after any crosshair change.
-- Settings modal has a live preview (checker box) + shape/rotation/length/thickness/gap/color/opacity/dot/outline controls + Reset button. Update via `updateCrosshair(patch)` (merges + persists + re-renders game crosshair + preview).
+- Settings drawer has a live preview, presets, shape/rotation/length/thickness/gap/colour/opacity/dot/outline controls, a base64 share code (sanitised on import) and Reset. Update via `updateCrosshair(patch)` (merges + persists + re-renders game crosshair + preview).
 
 **Files to Read First**
-- `src/core/Game.js` (main orchestrator)
-- `src/core/ModeRegistry.js` (mode loading)
-- `src/ui/OverlayManager.js` (modal lifecycle)
-- `src/modes/*.js` (gameplay rules)
+- `src/core/Game.js` (orchestrator + phase machine), `styles/tokens.css` (design), `src/ui/screens/*`, `src/modes/*.js`.
 
 **Dev gotchas**
-- Chrome caches JS modules with heuristic TTL (~10% of file age). Restart with a no-store server or bust URLs, or you may test stale code that MATCHES nothing on disk.
-- Headless screenshots: `agent-browser` with `AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable`. Pointer lock fails headless; use `window.game` evals to drive state.
+- Chrome caches modules heuristically. Disable cache (DevTools or CDP `Network.setCacheDisabled`) when testing.
+- Headless testing: pointer lock fails headless. Drive with `window.game`: `game.startMode('Static')`, then fake lock with `game.input.isLocked = true; game.hideLockPrompt(); game.startCountdown()`. Aim by setting `game.camera.instance.rotation` (yaw = atan2(-dx,-dz), pitch = atan2(dy, horiz)), call `updateMatrixWorld()`, then `game.shootAtCrosshair()`. End a run fast with `game.currentMode.timeLeft = 0.02`.
+- Headless WebGL (SwiftShader) runs ~15 fps; that is the test renderer, not the game.
 
 **Security posture (audited)**
-- Three.js is VENDORED at `src/vendor/three.module.js` (pinned r159) via `src/three-shim.js` — no third-party CDN code executes. Upgrade = replace the vendored file deliberately.
-- `firebase.json` sends security headers on hosting: CSP (script-src 'self'; inline styles required by the UI), nosniff, no-referrer, frame-ancestors/DENY, permissions lockout. Header set is validated locally by the scratchpad no-cache server (mirrors the same headers).
-- Crosshair config (round-trips localStorage) is sanitized in `mergeCrosshairConfig`: style whitelist, 6-digit hex color, numeric clamps. Never loosen it — that path feeds SVG markup.
-- Stats rows are built with DOM APIs (textContent), not innerHTML; layouts accept only object-shaped sessions.
-- `Storage` never throws on corrupt JSON (drops the key, uses fallback). Secrets: none in repo; workflow uses GitHub secrets only.
-- Dev affordance: `window.game` global intentionally exposed for debugging — remove for releases if paranoid.
+- Three.js core + post-processing add-ons are VENDORED (pinned r159). No third-party CDN code executes.
+- `firebase.json` CSP: script/style/font all `'self'` (inline styles allowed). Do not add external font or script hosts.
+- Crosshair config (localStorage and share codes) is sanitized in `mergeCrosshairConfig`. Never loosen it; that path feeds SVG markup.
+- Stats/results text is built with `h()` text nodes, not innerHTML. `Storage` never throws on corrupt JSON.
+- `window.game` is intentionally exposed for debugging.
 
 **Known Gaps / Next MVP Steps**
-- Add session duration limit with summary modal for other modes too (Static has it; Flick/Tracking/Reaction are endless).
 - Add one more focused mode (micro-adjustment).
-- OS display scale / browser zoom shifts sensitivity from the MR 1:1 mapping; consider a calibration option or documenting it in settings UI.
+- OS display scale / browser zoom shifts sensitivity from the MR 1:1 mapping; consider a calibration option.

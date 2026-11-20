@@ -1,0 +1,156 @@
+/* Results: the one screen that spends the delight budget (score ticker, staggered stats) */
+
+.results {
+  display: grid;
+  place-items: center;
+  padding: var(--space-5) var(--space-4);
+  background: var(--scrim-strong);
+  overflow-y: auto;
+}
+
+.results-card {
+  width: min(980px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: var(--space-7);
+  padding: var(--space-6);
+}
+
+.results-main {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+}
+
+.results-mode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-ui);
+  color: var(--ink-2);
+}
+
+.results-score {
+  font-size: var(--text-score);
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+
+.results-pb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 24px;
+  font-size: var(--text-ui);
+  color: var(--ink-2);
+}
+
+.results-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5) var(--space-4);
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.results-stats div {
+  animation: rise 260ms var(--ease-out) both;
+  animation-delay: calc(200ms + var(--i, 0) * 40ms);
+}
+
+.results-stats dt {
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+.results-stats dd {
+  margin-top: 2px;
+  font-size: var(--text-h3);
+}
+
+.results-stats dd small {
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+.results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.results-side {
+  display: grid;
+  align-content: start;
+  gap: var(--space-6);
+}
+
+.figure {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.figure-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.figure-title {
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+
+.figure-note {
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+.legend {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--ink-2);
+  list-style: none;
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--key);
+}
+
+.miss-map {
+  width: 100%;
+  max-width: 300px;
+  aspect-ratio: 1;
+  justify-self: center;
+}
+
+.trend {
+  width: 100%;
+  height: 96px;
+}
+
+.results-card {
+  animation: rise 320ms var(--ease-out) both;
+}
+
+
+@media (max-width: 860px) {
+  .results-card {
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+    padding: var(--space-5);
+  }
+}

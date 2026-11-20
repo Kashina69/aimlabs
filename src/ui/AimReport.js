@@ -10,6 +10,7 @@ export class AimReport {
     this.game = game;
     this.profile = computeAimProfile();
     this.el = document.createElement('div');
+    this.el.id = 'aim-report';
     this.el.className = 'glass';
     this.el.style.cssText = 'position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); padding:20px; min-width:520px; max-width:640px; max-height:90vh; overflow:auto;';
     this.build();
@@ -204,6 +205,11 @@ export class AimReport {
       this.game.closeOverlayToMenu();
       return;
     }
+    try { this.el.remove(); } catch (e) {}
+  }
+
+  /* OverlayManager owner hook: drop the element when another screen replaces it */
+  destroy() {
     try { this.el.remove(); } catch (e) {}
   }
 }

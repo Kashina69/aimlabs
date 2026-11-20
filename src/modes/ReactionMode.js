@@ -1,4 +1,5 @@
 import * as THREE from '../three-shim.js';
+import { tickSessionClock } from './sessionClock.js';
 
 /* Reflex drill: after an unknowable delay (max 3s) one ball appears and
    immediately starts aging away. Hit it for a reaction-time score; let it
@@ -6,6 +7,7 @@ import * as THREE from '../three-shim.js';
    response window. */
 const MAX_SPAWN_DELAY_MS = 3000;
 const MIN_SPAWN_DELAY_MS = 500;
+const SESSION_SECONDS = 30;
 
 export class ReactionMode {
   constructor(game) {
@@ -18,6 +20,7 @@ export class ReactionMode {
     this.maxCombo = 0;
     this.reactionTimes = [];
     this.waiting = true;
+    this.timeLeft = SESSION_SECONDS;
     this._timers = [];
   }
 
@@ -56,7 +59,8 @@ export class ReactionMode {
     }
   }
 
-  update() {
+  update(deltaMs = 16) {
+    if (tickSessionClock(this, deltaMs)) return;
     if (this.waiting || !this.target || !this.target.active) return;
     if (performance.now() - this.target.spawnedAt >= this.target.lifeMs) {
       /* Ball faded out unanswered: combo resets and the drill moves on */
@@ -110,7 +114,8 @@ export class ReactionMode {
       avgReaction: Math.round(avg),
       bestReaction: times.length ? Math.round(Math.min(...times)) : 0,
       reactionSpread: Math.round(sd),
-      reactionCount: times.length
+      reactionCount: times.length,
+      duration: SESSION_SECONDS * 1000
     };
   }
 }

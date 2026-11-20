@@ -24,9 +24,7 @@ export class Camera {
     this.maxPitch = MAX_PITCH;
     this.reset();
 
-    this.fov = Storage.get('settings.fov', 90);
-    this.instance.fov = this.fov;
-    this.instance.updateProjectionMatrix();
+    this.updateFOV(Storage.get('settings.fov', 103));
   }
 
   /* Snap the view back to looking straight at the target wall (+Z) at eye height */
@@ -42,9 +40,14 @@ export class Camera {
     rotation.x = Math.max(-this.maxPitch, Math.min(this.maxPitch, rotation.x));
   }
 
-  updateFOV(fov) {
-    this.fov = fov;
-    this.instance.fov = fov;
+  /* FOV is set horizontally (like Valorant / Apex / Marvel Rivals), so the same number
+     looks the same on any monitor shape; three.js wants vertical, so convert by aspect. */
+  updateFOV(horizontalFov = this.fov) {
+    this.fov = horizontalFov;
+    const aspect = window.innerWidth / window.innerHeight;
+    const halfH = (horizontalFov * Math.PI) / 360;
+    this.instance.aspect = aspect;
+    this.instance.fov = (2 * Math.atan(Math.tan(halfH) / aspect) * 180) / Math.PI;
     this.instance.updateProjectionMatrix();
   }
 }
