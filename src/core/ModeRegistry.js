@@ -5,7 +5,8 @@ const MODE_IMPORTS = [
   { label: 'Click Track', path: '../modes/ClickTrackMode.js', exportName: 'ClickTrackMode' },
   { label: 'Hold Track', path: '../modes/HoldTrackMode.js', exportName: 'HoldTrackMode' },
   { label: 'Reaction', path: '../modes/ReactionMode.js', exportName: 'ReactionMode' },
-  { label: 'Cone 45', path: '../modes/ConeMode.js', exportName: 'ConeMode' }
+  { label: 'Cone 45', path: '../modes/ConeMode.js', exportName: 'ConeMode' },
+  { label: 'Sens Finder', path: '../modes/SensFinderMode.js', exportName: 'SensFinderMode' }
 ];
 
 export async function loadSelectableModes() {

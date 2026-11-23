@@ -3,6 +3,7 @@ import { buildCrosshairSVG, mergeCrosshairConfig, CROSSHAIR_DEFAULTS } from './C
 import { TARGET_COLORS } from '../core/palette.js';
 import { QUALITY_PRESETS } from '../core/Quality.js';
 import { GAME_PROFILES, getProfileOrDefault, convertSensitivity, clampToProfile } from './GameProfiles.js';
+import { cmPer360 } from '../utils/sensitivity.js';
 
 const CLOSE_ICON = `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>`;
 
@@ -120,7 +121,21 @@ export class SettingsDrawer {
       readout,
       this.numberField({ label: 'Mouse DPI', hint: 'Only used for the cm/360 readout', key: 'dpi', min: 100, max: 32000, step: 50, after: updateReadout }),
       this.slider({ label: 'Field of view', hint: 'Horizontal degrees', key: 'fov', min: 70, max: 130, step: 1 }),
-      this.toggle({ label: 'Invert vertical look', key: 'invertY' })
+      this.toggle({ label: 'Invert vertical look', key: 'invertY' }),
+      h('div', { class: 'section' },
+        h('h3', { class: 'section-title' }, 'Sensitivity finder'),
+        this.game.phase === 'idle'
+          ? [
+              h('p', { class: 'readout' }, 'Measure the sensitivity you actually aim best at, then get an exact cm/360 for any converter.'),
+              h('button', {
+                class: 'btn btn-block',
+                onClick: () => {
+                  this.game.closeSettings({ instant: true });
+                  this.game.openSensSetup();
+                }
+              }, 'Find my sensitivity', h('span', { class: 'kbd' }, 'F'))
+            ]
+          : h('p', { class: 'readout' }, 'Finish this session to run the sensitivity finder. It needs the full range and pointer lock.'))
     );
   }
 
@@ -358,13 +373,6 @@ export class SettingsDrawer {
   refreshPreview() {
     if (this.preview) this.preview.innerHTML = buildCrosshairSVG(mergeCrosshairConfig(this.game.settings.crosshair));
   }
-}
-
-/* cm of mouse travel for a full 360° turn. `yaw` is the selected game profile's
-   degrees-per-count at sensitivity 1 (see GameProfiles.js). */
-export function cmPer360(sensitivity, dpi, yaw = 0.0176) {
-  const counts = 360 / (sensitivity * yaw);
-  return (counts / (dpi || 800)) * 2.54;
 }
 
 function qualityHint(id) {

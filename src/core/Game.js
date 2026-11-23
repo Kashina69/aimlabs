@@ -25,6 +25,9 @@ import { OverlayManager } from '../ui/OverlayManager.js';
 import { HomeScreen } from '../ui/screens/Home.js';
 import { createPauseScreen } from '../ui/screens/Pause.js';
 import { createResultsScreen } from '../ui/screens/Results.js';
+import { createSensSetupScreen } from '../ui/screens/SensSetup.js';
+import { createSensResultsScreen } from '../ui/screens/SensResults.js';
+import { SensTestStore } from '../utils/SensTestStore.js';
 import { createLockPrompt, createCountdown, createDeviceGate } from '../ui/screens/Prompts.js';
 import { buildCrosshairSVG, mergeCrosshairConfig } from '../ui/Crosshair.js';
 import {
@@ -256,7 +259,8 @@ export class Game {
       if (['live', 'countdown', 'arming', 'resuming'].includes(this.phase)) return this.pause();
       /* Chrome can deliver the same Esc as both a lock exit and a keydown; ignore the echo */
       if (this.phase === 'paused') return performance.now() - this.pausedAt > 300 ? this.resume() : undefined;
-      if (this.phase === 'results' || this.overlay.is('stats') || this.overlay.is('aim-report')) return this.showHome();
+      if (this.overlay.is('sens-setup')) return this.showHome();
+      if (this.phase === 'results' || this.overlay.is('stats') || this.overlay.is('aim-report') || this.overlay.is('sens-results')) return this.showHome();
       return this.openSettings();
     }
 
@@ -274,10 +278,13 @@ export class Game {
     if (event.code === 'ArrowUp' || event.code === 'ArrowDown') return this.home.moveSelection(event);
     if (/^Digit[1-9]$/.test(event.code)) return this.home.selectByNumber(Number(event.code.slice(5)));
     if (event.code === 'KeyS') return this.showStats();
+    if (event.code === 'KeyF') return this.openSensSetup();
     if (event.code === 'Comma') return this.openSettings();
   }
 
   handleSensKey(event) {
+    /* The finder changes sensitivity itself; a stray bracket press must not unblind the candidates */
+    if (this.currentMode?.resultKind === 'sens-finder') return;
     const delta = event.code === 'BracketLeft' ? -0.05 : 0.05;
     const profile = this.activeProfile();
     const next = clampToProfile(this.settings.sensitivity + delta, profile);
@@ -308,6 +315,8 @@ export class Game {
     this.camera.reset();
     this.phase = 'arming';
     this.clearFreeCursor();
+    this.input.freezeLook = false;
+    this.input.resetTravel();
     this.setInGameUI({ hud: true, crosshair: true });
     this.updateHUD();
     this.requestLock();
@@ -483,12 +492,15 @@ export class Game {
     if (this.input.isLocked) this.input.unlock();
     this.setInGameUI({ hud: true, crosshair: false });
     this.overlay.show(createPauseScreen(this));
+    /* Modes with their own in-session UI hide it behind the pause sheet */
+    this.currentMode?.onPause?.();
   }
 
   resume() {
     if (this.phase !== 'paused' || !this.currentMode) return;
     this.closeSettings({ instant: true });
     this.overlay.close();
+    this.currentMode?.onResume?.();
     this.phase = this.pausedFrom === 'live' ? 'resuming' : 'arming';
     this.setInGameUI({ hud: true, crosshair: true });
     this.requestLock();
@@ -522,15 +534,23 @@ export class Game {
     this.hideLockPrompt();
     this.clearFreeCursor();
     this.clearUITimers();
+    this.input.freezeLook = false;
+    this.input.resetTravel();
     this.input.lockEnabled = false;
     if (this.input.isLocked) this.input.unlock();
   }
 
-  /* Called when a drill sets `finished` (its clock ran out): save, then show results */
+  /**
+   * What: Ends a drill, saves its result and opens the right result screen.
+   * Why:  One exit path must handle normal drills and the sensitivity finder without
+   *       letting finder data enter the drill stats or Aim Report.
+   * How:  Branches on `mode.resultKind` before `bestFor`/`StatsManager`.
+   */
   endSession() {
     const modeName = this.currentModeName;
     const mode = this.currentMode;
     const session = this.session;
+    const isSensFinder = mode?.resultKind === 'sens-finder';
     this.phase = 'results';
     this.currentMode = null;
     this.currentModeName = null;
@@ -540,6 +560,31 @@ export class Game {
       summary = mode.end?.() || {};
     } catch (error) {
       console.warn('Mode end failed', error);
+    }
+
+    this.input.lockEnabled = false;
+    if (this.input.isLocked) this.input.unlock();
+    this.clearFreeCursor();
+    this.clearUITimers();
+    this.setInGameUI({ hud: false, crosshair: false });
+    this.clearActiveTargets();
+    this.audio.play('complete');
+
+    /* The finder is its own result type: its own store, its own screen. It never
+       enters the drill session log, so Stats and the Aim Report stay clean. */
+    if (isSensFinder) {
+      const sensRecord = {
+        ...summary,
+        id: `sens-${Date.now()}`,
+        at: Date.now(),
+        durationMs: Date.now() - (session?.startedAt || Date.now())
+      };
+      SensTestStore.push(sensRecord);
+      this.overlay.show(createSensResultsScreen(this, {
+        ...sensRecord,
+        shotLog: session?.shotLog || []
+      }));
+      return;
     }
 
     const previousBest = bestFor(modeName)?.score ?? null;
@@ -555,14 +600,6 @@ export class Game {
         : {})
     };
     StatsManager.push(record);
-
-    this.input.lockEnabled = false;
-    if (this.input.isLocked) this.input.unlock();
-    this.clearFreeCursor();
-    this.clearUITimers();
-    this.setInGameUI({ hud: false, crosshair: false });
-    this.clearActiveTargets();
-    this.audio.play('complete');
     this.overlay.show(createResultsScreen(this, { ...record, shotLog: session.shotLog, previousBest }));
   }
 
@@ -579,6 +616,15 @@ export class Game {
     if (!mode) return;
     this.audio.play('shoot');
     this.weapon.shoot();
+
+    /* The sensitivity finder measures the click-time aim. Without this flush a
+       shot would use a camera up to one frame stale, which is real movement lost
+       at the exact moment being measured. Other modes keep the rendered state. */
+    if (mode.flushInputBeforeShot) {
+      this.updateCameraFromMouse();
+      this.camera.instance.updateMatrixWorld();
+      this.camera.instance.matrixWorldInverse.copy(this.camera.instance.matrixWorld).invert();
+    }
 
     this.raycaster.setFromCamera(SCREEN_CENTER, this.camera.instance);
     /* Raycast live targets (pool.active), NOT pool.objects: that array is the
@@ -696,6 +742,13 @@ export class Game {
      (degrees per count at sens 1), so pasting that game's in-game value
      gives a 1:1 feel. invertY only flips pitch. */
   updateCameraFromMouse() {
+    /* Calibration steps freeze the view while still counting mouse travel */
+    if (this.input.freezeLook) {
+      this.input.mouse.x = 0;
+      this.input.mouse.y = 0;
+      return;
+    }
+
     const degPerCount = this.settings.sensitivity * this.activeProfile().yaw;
     const radiansPerPx = degPerCount * (Math.PI / 180);
     const dx = this.input.mouse.x * radiansPerPx;
@@ -768,6 +821,57 @@ export class Game {
     this.closeSettings({ instant: true });
     const page = new StatsPage(this);
     this.overlay.show(page.el, page);
+  }
+
+  /* ---------- Sensitivity finder ---------- */
+
+  /**
+   * What: Opens the sensitivity finder setup overlay.
+   * Why:  It is reachable from home, Settings and its own result screen, but must
+   *       never interrupt a live or paused session (no dead-end mid-run).
+   * How:  Normalises the phase to idle, clears session effects, then shows the screen.
+   */
+  openSensSetup() {
+    if (['live', 'countdown', 'arming', 'resuming', 'paused'].includes(this.phase)) return;
+    this.closeSettings({ instant: true });
+    if (this.phase !== 'idle') {
+      this.phase = 'idle';
+      this.currentMode = null;
+      this.currentModeName = null;
+    }
+    this.clearActiveTargets();
+    this.shards.hideAll();
+    this.missMarks.clear();
+    this.preview.setVisible(false);
+    this.setInGameUI({ hud: false, crosshair: false });
+    this.weapon.setVisible(false);
+    this.camera.instance.clearViewOffset();
+    this.overlay.show(createSensSetupScreen(this));
+  }
+
+  /**
+   * What: Starts a finder session from the setup config.
+   * Why:  The mode must read the same game/DPI the setup displayed.
+   * How:  Persists the scale, stashes the config for restarts, then starts the mode.
+   */
+  startSensFinder(config) {
+    this.setSetting('game', config.game || this.settings.game);
+    this.setSetting('dpi', config.dpi || this.settings.dpi);
+    this.sensFinderConfig = { ...config, game: this.settings.game, dpi: this.settings.dpi };
+    this.startMode('Sens Finder');
+  }
+
+  /**
+   * What: Writes a finder result into the live settings.
+   * Why:  The reported optimum is only useful if it can be adopted in one click.
+   * How:  Sets the tested game profile, then the 6-dp sensitivity in that scale.
+   */
+  applySensResult(record) {
+    if (!record) return;
+    this.setSetting('game', record.profileId);
+    this.setSetting('sensitivity', Math.round(record.bestSensitivity * 1000000) / 1000000);
+    /* Results are not a live session: keep the viewmodel out of the frame */
+    this.weapon.setVisible(false);
   }
 
   /* Settings drawer is modal: the rest of the UI goes inert so Tab stays inside,

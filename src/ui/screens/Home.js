@@ -4,7 +4,7 @@ import { bestFor, lastFor, scoreHistory, summarize } from '../../utils/records.j
 import { drawSparkline } from '../charts.js';
 import { Storage } from '../../utils/Storage.js';
 import { buildCrosshairSVG, mergeCrosshairConfig } from '../Crosshair.js';
-import { cmPer360 } from '../Settings.js';
+import { cmPer360 } from '../../utils/sensitivity.js';
 import { getProfileOrDefault } from '../GameProfiles.js';
 
 const BRAND_MARK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -12,6 +12,7 @@ const BRAND_MARK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const STATS_ICON = `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 16V9M10 16V4M16 16v-5"/></svg>`;
 const GEAR_ICON = `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>`;
 const REPORT_ICON = `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2l2.2 5.1L17.5 9l-5.3 1.9L10 16l-2.2-5.1L2.5 9l5.3-1.9z"/></svg>`;
+const SENS_ICON = `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="6"/><circle cx="10" cy="10" r="1.4" fill="currentColor" stroke="none"/><path d="M10 1.5v2.4M10 16.1v2.4M1.5 10h2.4M16.1 10h2.4"/></svg>`;
 
 /* Home is a launcher, not a landing page:
    - rail (left): pick a drill, see your loadout, reach Stats / Settings
@@ -100,7 +101,7 @@ export class HomeScreen {
         h('span', { class: 'loadout-edit' }, 'Edit')
       ),
       neverSet
-        ? h('p', { class: 'loadout-nudge' }, 'Set the sensitivity you use in your main game so aim transfers 1:1.')
+        ? h('p', { class: 'loadout-nudge' }, 'Set the sensitivity you use in your main game so aim transfers 1:1 — or run the sens finder to measure it.')
         : null
     );
   }
@@ -114,7 +115,9 @@ export class HomeScreen {
         h('button', { class: 'btn btn-text', onClick: () => this.game.openSettings(), 'aria-keyshortcuts': ',' },
           svg(GEAR_ICON), 'Settings', h('span', { class: 'kbd' }, ',')),
         h('button', { class: 'btn btn-text', onClick: () => this.game.showAimReport() },
-          svg(REPORT_ICON), 'Aim report')
+          svg(REPORT_ICON), 'Aim report'),
+        h('button', { class: 'btn btn-text', onClick: () => this.game.openSensSetup(), 'aria-keyshortcuts': 'F' },
+          svg(SENS_ICON), 'Sens finder', h('span', { class: 'kbd' }, 'F'))
       ),
       h('p', { class: 'rail-progress' },
         totals

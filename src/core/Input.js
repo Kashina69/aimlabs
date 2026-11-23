@@ -2,6 +2,12 @@ export class Input {
   constructor(canvas) {
     this.canvas = canvas;
     this.mouse = { x: 0, y: 0 };
+    /* Absolute mouse travel since the last reset. Used by the sensitivity
+       finder's pointer-acceleration check, which compares the counts for the
+       same physical sweep made slowly and quickly. */
+    this.travel = { x: 0, y: 0 };
+    /* Freezes view rotation while still counting travel (calibration steps) */
+    this.freezeLook = false;
     this.isLocked = false;
     /* Free-cursor mode: the game deliberately released the pointer during a
        session, so losing lock must not auto-pause and the cursor is a normal
@@ -30,6 +36,8 @@ export class Input {
       if (this.isLocked) {
         this.mouse.x += e.movementX;
         this.mouse.y += e.movementY;
+        this.travel.x += Math.abs(e.movementX);
+        this.travel.y += Math.abs(e.movementY);
       }
     });
 
@@ -46,6 +54,16 @@ export class Input {
     document.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.primaryDown = false;
     });
+  }
+
+  /**
+   * What: Clears the accumulated absolute mouse travel.
+   * Why:  The acceleration probe measures one sweep at a time.
+   * How:  Zeroes both axes.
+   */
+  resetTravel() {
+    this.travel.x = 0;
+    this.travel.y = 0;
   }
 
   requestLock() {
