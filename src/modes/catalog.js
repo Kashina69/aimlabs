@@ -1,6 +1,6 @@
 /* Display metadata for every drill. Keys match the names sessions are saved under
    (ModeRegistry labels), so renaming a title here never breaks stored stats. */
-export const MODE_ORDER = ['Static', 'Flick', 'Click Track', 'Hold Track', 'Reaction'];
+export const MODE_ORDER = ['Static', 'Flick', 'Click Track', 'Hold Track', 'Reaction', 'Cone 45'];
 
 export const MODE_INFO = {
   Static: {
@@ -48,6 +48,15 @@ export const MODE_INFO = {
     diagram: `<svg viewBox="0 0 72 72" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
       <circle cx="36" cy="36" r="17"/><path d="M36 19 A17 17 0 0 1 53 36" stroke-width="3"/>
       <circle class="hot" cx="36" cy="36" r="6"/></svg>`
+  },
+  'Cone 45': {
+    title: 'Cone 45',
+    sub: 'Warm-up, 45° in front',
+    desc: 'Small, far targets appear only inside the central 45 degrees, and your view is held to that cone. A short pre-game warm-up for the flicks that actually happen in a match: tight corrections and micro-adjustments, never a corner-to-corner spin.',
+    facts: ['60 s', '2 targets', 'Pre-game warm-up'],
+    diagram: `<svg viewBox="0 0 72 72" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+      <path d="M36 60 L15 20M36 60 L57 20" stroke-dasharray="2 3"/>
+      <circle class="hot" cx="28" cy="34" r="4.5"/><circle class="hot" cx="45" cy="29" r="4.5"/></svg>`
   }
 };
 

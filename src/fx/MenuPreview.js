@@ -5,6 +5,8 @@ import { createTargetMaterial } from '../core/Target.js';
    it is before they start (motion with an explanation purpose). It owns its own
    four target meshes and never touches the gameplay pool or scoring. */
 const ZONE = { x: 4.2, yMin: 1.1, yMax: 4.1, zMin: 9.5, zMax: 12.5 };
+/* Cone 45 ghost run: everything stays inside the central wedge */
+const CONE = { x: 2.2, yMin: 1.3, yMax: 3.2, zMin: 9.5, zMax: 12.5 };
 const SPAWN_MS = 140;
 const tmp = new THREE.Vector3();
 
@@ -45,6 +47,7 @@ export class MenuPreview {
     this.nextEvent = 0;
     for (const t of this.targets) t.mesh.visible = false;
     if (mode === 'Static') this.targets.forEach((t, i) => this.spawn(t, i * 90));
+    if (mode === 'Cone 45') this.spawn(this.targets[0], 0, 0, CONE);
   }
 
   update(dt) {
@@ -56,6 +59,7 @@ export class MenuPreview {
     else if (this.mode === 'Flick') this.updateFlick(now);
     else if (this.mode === 'Click Track' || this.mode === 'Hold Track') this.updateTracking(now);
     else if (this.mode === 'Reaction') this.updateReaction(now);
+    else if (this.mode === 'Cone 45') this.updateCone(now);
 
     for (const t of this.targets) {
       if (!t.mesh.visible) continue;
@@ -110,11 +114,20 @@ export class MenuPreview {
     this.nextEvent = now + 1100 + Math.random() * 1200;
   }
 
-  spawn(t, delay, now = this.clock) {
+  /* Cone 45: small targets deep inside the wedge, hit just before they fade */
+  updateCone(now) {
+    const t = this.targets[0];
+    if (now < this.nextEvent) return;
+    this.spawn(t, 0, now, CONE);
+    t.popAt = now + 560;
+    this.nextEvent = now + 900;
+  }
+
+  spawn(t, delay, now = this.clock, box = ZONE) {
     t.mesh.position.set(
-      THREE.MathUtils.randFloatSpread(ZONE.x * 2),
-      THREE.MathUtils.randFloat(ZONE.yMin, ZONE.yMax),
-      THREE.MathUtils.randFloat(ZONE.zMin, ZONE.zMax)
+      THREE.MathUtils.randFloatSpread(box.x * 2),
+      THREE.MathUtils.randFloat(box.yMin, box.yMax),
+      THREE.MathUtils.randFloat(box.zMin, box.zMax)
     );
     t.bornAt = now + delay;
     t.popAt = Infinity;

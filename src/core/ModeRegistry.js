@@ -4,7 +4,8 @@ const MODE_IMPORTS = [
   { label: 'Flick', path: '../modes/FlickMode.js', exportName: 'FlickMode' },
   { label: 'Click Track', path: '../modes/ClickTrackMode.js', exportName: 'ClickTrackMode' },
   { label: 'Hold Track', path: '../modes/HoldTrackMode.js', exportName: 'HoldTrackMode' },
-  { label: 'Reaction', path: '../modes/ReactionMode.js', exportName: 'ReactionMode' }
+  { label: 'Reaction', path: '../modes/ReactionMode.js', exportName: 'ReactionMode' },
+  { label: 'Cone 45', path: '../modes/ConeMode.js', exportName: 'ConeMode' }
 ];
 
 export async function loadSelectableModes() {
