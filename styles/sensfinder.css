@@ -1,0 +1,365 @@
+/* Sensitivity finder: setup overlay, in-session progress, and the result report.
+   Same rules as the rest of the app: tokens only, numbers in .num, nothing
+   animates near the crosshair, and reduced motion is handled globally. */
+
+/* A fourth rail action exists now; let it wrap instead of overflowing */
+.rail-actions {
+  flex-wrap: wrap;
+}
+
+/* ---------- Shared shells ---------- */
+.sens-setup,
+.sens-results {
+  /* flex + flex-start, not grid centering: a tall card must stay reachable by
+     scrolling from its first line on short viewports */
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: var(--space-5) var(--space-4);
+  background: var(--scrim-strong);
+  overflow-y: auto;
+}
+
+.sens-setup-card {
+  width: min(900px, 100%);
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  animation: rise 260ms var(--ease-out) both;
+}
+
+.sens-title {
+  font-size: var(--text-h2);
+  letter-spacing: -0.01em;
+}
+
+.sens-lede {
+  max-width: 68ch;
+  font-size: var(--text-ui);
+  color: var(--ink-2);
+}
+
+.sens-note {
+  max-width: 70ch;
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+/* ---------- Setup ---------- */
+.sens-setup-head {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sens-setup-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: var(--space-6);
+}
+
+.sens-setup-fields .section {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* Number fields in this card sit directly in a field, not in a .field-row */
+.sens-setup-fields .input-num {
+  width: min(220px, 100%);
+}
+
+.sens-setup-side {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface-1);
+}
+
+.sens-setup-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.sens-how summary {
+  cursor: pointer;
+  font-size: var(--text-caption);
+  color: var(--ink-2);
+}
+
+.sens-how p {
+  margin-top: var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+.sens-checks {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sens-check {
+  display: grid;
+  gap: 4px;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line-soft);
+}
+
+.sens-check:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.sens-check-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.sens-check-label {
+  font-size: var(--text-ui);
+}
+
+.sens-check-hint {
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+.sens-check.is-warn .badge {
+  color: var(--bad);
+}
+
+/* ---------- In-session progress + banner ---------- */
+#ui-prompt > .sens-progress {
+  inset: auto;
+  top: var(--space-5);
+  left: var(--space-5);
+  width: min(232px, 38vw);
+  display: grid;
+  gap: 4px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-control);
+  background: var(--panel);
+  pointer-events: none;
+}
+
+.sens-progress-head {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.sens-progress-text {
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+
+.sens-progress-sub {
+  font-size: var(--text-caption);
+  color: var(--ink-2);
+}
+
+.sens-progress-bar {
+  height: 4px;
+  margin-top: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.sens-progress-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--signal);
+  border-radius: inherit;
+  transition: width var(--dur-ui) var(--ease-out);
+}
+
+#ui-prompt > .sens-banner {
+  inset: auto;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(560px, calc(100vw - 48px));
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-control);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: var(--text-ui);
+  text-align: center;
+  pointer-events: none;
+}
+
+#ui-prompt > .sens-banner.is-sticky {
+  border-color: var(--signal);
+}
+
+/* ---------- Results ---------- */
+.sens-card {
+  width: min(1080px, 100%);
+  margin-bottom: var(--space-5);
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: var(--space-7);
+  padding: var(--space-6);
+  animation: rise 260ms var(--ease-out) both;
+}
+
+.sens-main,
+.sens-side {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+}
+
+.sens-result-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.sens-hero {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.sens-big {
+  font-size: clamp(2.6rem, 6vw, 3.9rem);
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+
+.sens-unit {
+  font-size: var(--text-ui);
+  color: var(--ink-2);
+}
+
+.sens-hero-sub {
+  font-size: var(--text-ui);
+  color: var(--ink-2);
+}
+
+.sens-ci {
+  font-size: var(--text-ui);
+  color: var(--ink-2);
+}
+
+.sens-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.sens-stats dt {
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+.sens-stats dd {
+  margin-top: 2px;
+  font-size: var(--text-body);
+}
+
+.sens-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sens-curve {
+  width: 100%;
+  height: 150px;
+}
+
+.sens-zone {
+  display: grid;
+  gap: 4px;
+  margin-top: var(--space-3);
+}
+
+.sens-zone-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--text-ui);
+}
+
+.sens-zone-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.sens-zone-track i {
+  display: block;
+  height: 100%;
+  background: var(--signal);
+  border-radius: inherit;
+}
+
+.sens-games {
+  display: grid;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.sens-game {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 42px;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: var(--text-ui);
+}
+
+.sens-game-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.sens-game-short {
+  text-align: right;
+  font-size: var(--text-caption);
+  color: var(--ink-3);
+}
+
+.sens-game .is-clamped {
+  color: var(--bad);
+}
+
+@media (max-width: 900px) {
+  .sens-card,
+  .sens-setup-body {
+    grid-template-columns: 1fr;
+  }
+
+  .sens-card {
+    gap: var(--space-6);
+    padding: var(--space-5);
+  }
+
+  .sens-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
